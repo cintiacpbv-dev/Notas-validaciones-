@@ -3,9 +3,12 @@ package com.cintia.misnotas;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -71,6 +74,7 @@ public class MainActivity extends ComponentActivity {
     private Uri cameraOutputUri;
     private PermissionRequest pendingWebPermission;
     private int permissionPurpose;
+    private boolean captureVideo;
 
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private ActivityResultLauncher<String[]> permissionLauncher;
@@ -78,6 +82,9 @@ public class MainActivity extends ComponentActivity {
     private final Map<String, File> exportFiles = new HashMap<>();
     private final Map<String, OutputStream> exportStreams = new HashMap<>();
     private final Map<String, String> exportMimes = new HashMap<>();
+    private final Map<String, File> readyFiles = new HashMap<>();
+    private final Map<String, String> readyMimes = new HashMap<>();
+    private static final String[] WHATSAPP = {"com.whatsapp", "com.whatsapp.w4b"};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,6 +109,7 @@ public class MainActivity extends ComponentActivity {
         setDarkBars(false);
 
         configureWebView();
+        cleanOldCache();
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
@@ -199,11 +207,14 @@ public class MainActivity extends ComponentActivity {
             filePathCallback = callback;
 
             String[] accept = params.getAcceptTypes();
-            boolean wantsImages = false;
+            boolean wantsImages = false, wantsVideo = false;
             for (String a : accept) {
-                if (a != null && (a.contains("image") || a.contains("video"))) wantsImages = true;
+                if (a == null) continue;
+                if (a.contains("image")) wantsImages = true;
+                if (a.contains("video")) wantsVideo = true;
             }
-            if (params.isCaptureEnabled() && wantsImages) {
+            if (params.isCaptureEnabled() && (wantsImages || wantsVideo)) {
+                captureVideo = wantsVideo && !wantsImages;
                 if (has(Manifest.permission.CAMERA)) {
                     launchCamera();
                 } else {
@@ -251,15 +262,16 @@ public class MainActivity extends ComponentActivity {
         try {
             File dir = new File(getCacheDir(), "camera");
             if (!dir.exists()) dir.mkdirs();
-            File photo = new File(dir, "IMG_" + System.currentTimeMillis() + ".jpg");
-            cameraOutputUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", photo);
-            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            File out = new File(dir, (captureVideo ? "VID_" : "IMG_") + System.currentTimeMillis() + (captureVideo ? ".mp4" : ".jpg"));
+            cameraOutputUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", out);
+            Intent intent = new Intent(captureVideo ? MediaStore.ACTION_VIDEO_CAPTURE : MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraOutputUri);
+            if (captureVideo) intent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1);
             intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             fileChooserLauncher.launch(intent);
         } catch (ActivityNotFoundException e) {
             cameraOutputUri = null;
-            launchPicker(new String[]{"image/*"}, false);
+            launchPicker(new String[]{captureVideo ? "video/*" : "image/*"}, false);
         }
     }
 
@@ -377,11 +389,85 @@ public class MainActivity extends ComponentActivity {
                 out.close();
             } catch (IOException ignored) {
             }
-            String savedWhere = saveToDownloads(f, mime) ? "Descargas" : "";
+            String savedWhere = MainActivity.this.saveToDownloads(f, mime) ? "Descargas" : "";
             final File file = f;
             final String type = mime;
             runOnUiThread(() -> shareFile(file, type));
             return savedWhere;
+        }
+
+        // Cierra el archivo recibido por partes y lo deja listo para compartir o guardar.
+        @JavascriptInterface
+        public void endFile(String id) {
+            synchronized (exportFiles) {
+                File f = exportFiles.remove(id);
+                OutputStream out = exportStreams.remove(id);
+                String mime = exportMimes.remove(id);
+                if (out != null) {
+                    try { out.close(); } catch (IOException ignored) { }
+                }
+                if (f != null) {
+                    readyFiles.put(id, f);
+                    readyMimes.put(id, mime);
+                }
+            }
+        }
+
+        @JavascriptInterface
+        public String saveToDownloads(String id) {
+            File f;
+            String mime;
+            synchronized (exportFiles) {
+                f = readyFiles.get(id);
+                mime = readyMimes.get(id);
+            }
+            if (f == null) return "";
+            return MainActivity.this.saveToDownloads(f, mime) ? "Descargas" : "";
+        }
+
+        // Comparte uno o varios archivos. target = "whatsapp" intenta abrir WhatsApp directamente.
+        @JavascriptInterface
+        public String shareFiles(String idsCsv, String text, String target) {
+            final ArrayList<Uri> uris = new ArrayList<>();
+            final List<String> mimes = new ArrayList<>();
+            synchronized (exportFiles) {
+                for (String id : idsCsv.split(",")) {
+                    File f = readyFiles.get(id.trim());
+                    if (f == null) continue;
+                    uris.add(FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", f));
+                    mimes.add(readyMimes.get(id.trim()));
+                }
+            }
+            if (uris.isEmpty()) return "error";
+            final Intent send = new Intent(uris.size() == 1 ? Intent.ACTION_SEND : Intent.ACTION_SEND_MULTIPLE);
+            send.setType(commonMime(mimes));
+            if (uris.size() == 1) send.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+            else send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+            ClipData clip = ClipData.newRawUri("", uris.get(0));
+            for (int i = 1; i < uris.size(); i++) clip.addItem(new ClipData.Item(uris.get(i)));
+            send.setClipData(clip);
+            if (text != null && !text.isEmpty()) send.putExtra(Intent.EXTRA_TEXT, text);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            return startShare(send, target);
+        }
+
+        @JavascriptInterface
+        public String shareText(String text, String target) {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_TEXT, text);
+            return startShare(send, target);
+        }
+
+        @JavascriptInterface
+        public void openExternal(final String url) {
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                } catch (ActivityNotFoundException e) {
+                    Toast.makeText(MainActivity.this, "No hay una app para abrir el enlace", Toast.LENGTH_SHORT).show();
+                }
+            });
         }
 
         @JavascriptInterface
@@ -408,6 +494,70 @@ public class MainActivity extends ComponentActivity {
             getContentResolver().delete(uri, null, null);
             return false;
         }
+    }
+
+    private String startShare(final Intent send, String target) {
+        String pkg = null;
+        if ("whatsapp".equals(target)) {
+            for (String p : WHATSAPP) {
+                if (isInstalled(p)) { pkg = p; break; }
+            }
+        }
+        final String chosen = pkg;
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                if (chosen != null) {
+                    Intent direct = new Intent(send);
+                    direct.setPackage(chosen);
+                    startActivity(direct);
+                } else {
+                    startActivity(Intent.createChooser(send, "Compartir con"));
+                }
+            } catch (ActivityNotFoundException e) {
+                try {
+                    startActivity(Intent.createChooser(send, "Compartir con"));
+                } catch (Exception ignored) {
+                    Toast.makeText(MainActivity.this, "No se pudo compartir", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        return "whatsapp".equals(target) && chosen == null ? "fallback" : "ok";
+    }
+
+    private boolean isInstalled(String pkg) {
+        try {
+            getPackageManager().getPackageInfo(pkg, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    private static String commonMime(List<String> mimes) {
+        String first = mimes.get(0) == null ? "*/*" : mimes.get(0);
+        boolean same = true, sameTop = true;
+        String top = first.split("/")[0];
+        for (String m : mimes) {
+            if (m == null) m = "*/*";
+            if (!m.equals(first)) same = false;
+            if (!m.split("/")[0].equals(top)) sameTop = false;
+        }
+        if (same) return first;
+        return sameTop ? top + "/*" : "*/*";
+    }
+
+    // Borra archivos temporales de más de 2 días (fotos de cámara ya importadas, exportaciones)
+    private void cleanOldCache() {
+        new Thread(() -> {
+            long limit = System.currentTimeMillis() - 2L * 24 * 60 * 60 * 1000;
+            for (String name : new String[]{"camera", "exports"}) {
+                File[] files = new File(getCacheDir(), name).listFiles();
+                if (files == null) continue;
+                for (File f : files) {
+                    if (f.lastModified() < limit) f.delete();
+                }
+            }
+        }).start();
     }
 
     private void shareFile(File f, String mime) {

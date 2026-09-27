@@ -7,13 +7,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Mis Notas">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#FF8FB1">
+    <meta name="theme-color" content="#F3F2EE">
     <meta name="description" content="Editor de validaciones sobre PDF y agenda personal de notas">
     <title>Mis Notas</title>
     <link rel="icon" type="image/svg+xml" href="icons/schnauzer.svg">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/validaciones.css">
     <link rel="stylesheet" href="css/agenda.css">
     <script src="vendor/pdf.min.js"></script>
     <script src="vendor/localforage.min.js"></script>
@@ -28,86 +29,108 @@
                 <span class="nav-brand-text">Mis Notas</span>
             </div>
             <button class="nav-item active" data-section="validaciones">
-                <span class="nav-icon">📋</span><span class="nav-label">Validaciones</span>
+                <i data-icon="clipboard"></i><span class="nav-label">Validaciones</span>
             </button>
             <button class="nav-item" data-section="agenda">
-                <span class="nav-icon">🎀</span><span class="nav-label">Mi Agenda</span>
+                <i data-icon="bow"></i><span class="nav-label">Mi Agenda</span>
             </button>
             <div class="nav-spacer"></div>
             <button class="nav-item nav-item-theme js-theme-toggle" title="Cambiar tema">
-                <span class="nav-icon js-theme-icon">🌙</span><span class="nav-label">Tema</span>
+                <span class="js-theme-icon"></span><span class="nav-label js-theme-label">Tema</span>
             </button>
         </nav>
 
         <main class="app-main">
             <!-- ============ VALIDACIONES ============ -->
-            <section id="section-validaciones" class="section">
-                <div id="view-dashboard" class="view">
-                    <header class="topbar">
-                        <h1><span class="hide-xs">📋 </span>Validaciones</h1>
-                        <div class="header-actions">
-                            <button class="btn-icon" id="btn-export" title="Exportar respaldo">📤<span class="btn-text">Exportar</span></button>
-                            <button class="btn-icon" id="btn-import" title="Importar respaldo">📥<span class="btn-text">Importar</span></button>
-                            <button class="btn" id="btn-new-project">＋<span class="hide-xs"> Nuevo</span></button>
+            <section id="section-validaciones" class="section vx">
+                <!-- Panel de proyectos -->
+                <div id="vx-dashboard" class="vx-view">
+                    <header class="vx-head">
+                        <div class="vx-head-title">
+                            <h1>Validaciones</h1>
+                            <p class="vx-muted" id="vx-summary"></p>
+                        </div>
+                        <div class="vx-head-actions">
+                            <button class="vx-sync" id="vx-sync" title="Nube y dispositivo"></button>
+                            <button class="vx-btn vx-btn-quiet" id="vx-import" title="Importar proyecto (.json) o respaldo (.zip)"><i data-icon="upload"></i><span>Importar</span></button>
+                            <button class="vx-btn vx-btn-icon" id="vx-dash-more" title="Más opciones" aria-label="Más opciones"><i data-icon="more"></i></button>
+                            <button class="vx-btn vx-btn-primary" id="vx-new" title="Nuevo proyecto"><i data-icon="plus"></i><span>Nuevo proyecto</span></button>
                         </div>
                     </header>
-                    <div class="dashboard-content">
-                        <div class="section-header">
-                            <h2 class="section-title">📁 Mis Proyectos</h2>
-                            <input type="search" id="project-search" class="search-input" placeholder="🔍 Buscar proyecto...">
+                    <div class="vx-filters">
+                        <label class="vx-search"><i data-icon="search"></i><input type="search" id="vx-search" placeholder="Buscar proyecto o documento" aria-label="Buscar"></label>
+                        <div class="vx-seg" id="vx-filter" role="tablist">
+                            <button data-f="all" class="is-on">Todos</button>
+                            <button data-f="active">En curso</button>
+                            <button data-f="done">Completados</button>
                         </div>
-                        <div class="project-grid" id="project-list-container">
-                            <div class="empty-state"><div class="empty-icon">📭</div><p>No hay proyectos aún</p></div>
-                        </div>
+                        <label class="vx-select" title="Ordenar"><i data-icon="sort"></i>
+                            <select id="vx-sort" aria-label="Ordenar">
+                                <option value="recent">Recientes</option>
+                                <option value="name">Nombre</option>
+                                <option value="pending">Más pendientes</option>
+                            </select>
+                        </label>
                     </div>
+                    <div class="vx-scroll">
+                        <div class="vx-table-head" id="vx-table-head" aria-hidden="true"><span>Proyecto</span><span>Documento</span><span>Avance</span><span>Actualizado</span><span></span></div>
+                        <div class="vx-list" id="vx-list"></div>
+                    </div>
+                    <div class="vx-drop" id="vx-drop"><div><i data-icon="filePlus"></i><p>Suelta el PDF para crear un proyecto</p></div></div>
                 </div>
 
-                <div id="view-editor" class="view hidden">
-                    <header class="topbar">
-                        <button class="btn btn-secondary" id="btn-back-dashboard" title="Volver">←<span class="hide-xs"> Panel</span></button>
-                        <h1 id="editor-project-title">Proyecto</h1>
-                        <div class="header-actions">
-                            <button class="btn-icon js-theme-toggle editor-theme" title="Tema"><span class="js-theme-icon">🌙</span></button>
-                            <button class="btn btn-success" id="btn-save-exit">💾<span class="hide-xs"> Guardar</span></button>
+                <!-- Editor de revisión -->
+                <div id="vx-editor" class="vx-view hidden">
+                    <header class="vx-ebar">
+                        <button class="vx-btn vx-btn-icon" id="vx-back" title="Volver a proyectos" aria-label="Volver a proyectos"><i data-icon="arrowLeft"></i></button>
+                        <div class="vx-ebar-title">
+                            <input id="vx-title" class="vx-title-input" aria-label="Nombre del proyecto" spellcheck="false" autocomplete="off">
+                            <span id="vx-docline" class="vx-muted"></span>
+                        </div>
+                        <div class="vx-pager">
+                            <button class="vx-btn vx-btn-icon" id="vx-prev" title="Página anterior (←)" aria-label="Página anterior"><i data-icon="chevronLeft"></i></button>
+                            <label class="vx-pageno"><input id="vx-page" inputmode="numeric" value="1" aria-label="Página actual"><span>/ <b id="vx-pages">–</b></span></label>
+                            <button class="vx-btn vx-btn-icon" id="vx-next" title="Página siguiente (→)" aria-label="Página siguiente"><i data-icon="chevronRight"></i></button>
+                        </div>
+                        <div class="vx-zoom">
+                            <button class="vx-btn vx-btn-icon" id="vx-zoom-out" title="Alejar (Ctrl −)" aria-label="Alejar"><i data-icon="zoomOut"></i></button>
+                            <button class="vx-zoom-level" id="vx-zoom-level" title="Ajustar a la pantalla">100%</button>
+                            <button class="vx-btn vx-btn-icon" id="vx-zoom-in" title="Acercar (Ctrl +)" aria-label="Acercar"><i data-icon="zoomIn"></i></button>
+                            <button class="vx-btn vx-btn-icon" id="vx-fit" title="Ajustar al ancho" aria-label="Ajustar al ancho"><i data-icon="fitWidth"></i></button>
+                        </div>
+                        <div class="vx-ebar-actions">
+                            <button class="vx-sync vx-sync-compact" id="vx-sync-mini" title="Nube y dispositivo"></button>
+                            <button class="vx-btn vx-btn-quiet" id="vx-share" title="Compartir y exportar"><i data-icon="share"></i><span>Compartir</span></button>
+                            <button class="vx-btn vx-btn-quiet vx-panel-btn" id="vx-panel-btn" title="Observaciones" aria-pressed="false"><i data-icon="list"></i><span>Observaciones</span><em id="vx-open-count">0</em></button>
                         </div>
                     </header>
-                    <div class="pdf-controls">
-                        <div class="page-nav">
-                            <button id="pdf-prev" title="Página anterior">◀</button>
-                            <span class="page-indicator">Pág <strong id="pdf-current-page">0</strong>/<strong id="pdf-total-pages">0</strong></span>
-                            <button id="pdf-next" title="Página siguiente">▶</button>
-                        </div>
-                        <div class="zoom-controls">
-                            <button class="btn-icon" id="btn-zoom-out" title="Alejar">➖</button>
-                            <span class="zoom-level" id="zoom-level">100%</span>
-                            <button class="btn-icon" id="btn-zoom-in" title="Acercar">➕</button>
-                            <button class="btn-icon" id="btn-zoom-fit" title="Ajustar al ancho">↔️</button>
-                        </div>
-                    </div>
-                    <div class="editor-main" id="editor-main-container">
-                        <div id="pdf-upload-loader">
-                            <div class="empty-state"><div class="empty-icon">📄</div><p style="font-weight:600;">Carga un PDF</p>
-                                <label for="file-pdf" class="btn" style="margin-top:12px;">Seleccionar</label>
-                                <input type="file" id="file-pdf" accept="application/pdf">
+                    <div class="vx-work" id="vx-work">
+                        <nav class="vx-tools" id="vx-tools" aria-label="Herramientas"></nav>
+                        <div class="vx-stage-wrap">
+                            <div class="vx-hint hidden" id="vx-hint"><i data-icon="marker"></i><span id="vx-hint-text"></span><button id="vx-hint-cancel">Cancelar</button></div>
+                            <div class="vx-stage" id="vx-stage">
+                                <div id="vx-nodoc" class="vx-nodoc hidden"></div>
+                                <div id="pdf-container" class="vx-page hidden">
+                                    <canvas id="pdf-canvas"></canvas>
+                                    <div class="textLayer" id="pdf-text-layer"></div>
+                                    <div class="vx-annot-layer" id="annotation-layer"></div>
+                                </div>
                             </div>
                         </div>
-                        <div id="pdf-container" style="display:none;">
-                            <canvas id="pdf-canvas"></canvas>
-                            <div class="textLayer" id="pdf-text-layer"></div>
-                            <div class="annotation-layer-div" id="annotation-layer"></div>
-                        </div>
+                        <div class="vx-scrim" id="vx-scrim"></div>
+                        <aside class="vx-panel" id="vx-panel" aria-label="Observaciones">
+                            <div class="vx-sheet-handle"></div>
+                            <div id="vx-panel-list" class="vx-panel-body"></div>
+                            <div id="vx-panel-detail" class="vx-panel-body hidden"></div>
+                        </aside>
                     </div>
-                    <input type="file" accept="image/*,video/*" capture="environment" id="file-camera">
-                    <input type="file" accept="image/*,video/*" id="file-gallery">
-                    <nav class="bottom-dock" aria-label="Herramientas">
-                        <button class="dock-btn" id="btn-dock-camera"><div class="dock-icon">📸</div><span>Foto</span></button>
-                        <button class="dock-btn dock-btn-primary" id="btn-dock-note" title="Arrastra al documento"><div class="dock-icon">📝</div><span>Nota</span></button>
-                        <button class="dock-btn dock-btn-danger" id="btn-dock-replacement" title="Selecciona texto y pulsa"><div class="dock-icon">✏️</div><span>Reemp.</span></button>
-                        <button class="dock-btn" id="btn-dock-audio"><div class="dock-icon" id="audio-icon">🎤</div><span>Audio</span></button>
-                        <button class="dock-btn" id="btn-dock-timer"><div class="dock-icon">⏱️</div><span>Tiempo</span></button>
-                    </nav>
+                    <button class="vx-selchip hidden" id="vx-selchip"><i data-icon="strike"></i>Tachar y reemplazar</button>
+                    <input type="file" id="vx-file-photo" accept="image/*" capture="environment" hidden>
+                    <input type="file" id="vx-file-video" accept="video/*" capture="environment" hidden>
+                    <input type="file" id="vx-file-gallery" accept="image/*,video/*" hidden>
+                    <input type="file" id="vx-file-pdf" accept="application/pdf,.pdf" hidden>
                 </div>
-                <input type="file" id="file-import" accept=".zip,application/zip">
+                <input type="file" id="vx-file-import" accept=".json,.zip,application/json,application/zip" hidden>
             </section>
 
             <!-- ============ AGENDA ============ -->
@@ -175,20 +198,12 @@
         </main>
     </div>
 
-    <div id="timer-modal" class="modal-overlay hidden">
-        <div class="timer-modal">
-            <h3 style="color:var(--text-secondary);">⏱️ Cronómetro</h3>
-            <div class="timer-display" id="timer-display">00:00.00</div>
-            <div class="timer-buttons">
-                <button class="btn" id="btn-timer-start">▶ Iniciar</button>
-                <button class="btn btn-danger hidden" id="btn-timer-stop">⏹ Parar</button>
-                <button class="btn btn-success" id="btn-timer-save" disabled>💾 Guardar</button>
-                <button class="btn btn-secondary" id="btn-timer-cancel">✖</button>
-            </div>
-        </div>
-    </div>
-
+    <script src="js/config.js"></script>
+    <script src="js/icons.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/sync.js"></script>
+    <script src="js/share.js"></script>
     <script src="js/validaciones.js"></script>
     <script src="js/agenda.js"></script>
     <script src="js/app.js"></script>

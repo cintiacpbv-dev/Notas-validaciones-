@@ -35,6 +35,9 @@ var Agenda = (function() {
 
     // ---------- Datos ----------
     function save() { return localforage.setItem(STORE_KEY, notes); }
+    // Marca una nota como modificada para enviarla a la nube (si está conectada)
+    function changed(n) { if (n) { n.updated = Date.now(); n._dirty = true; } var p = save(); Sync.schedule(); return p; }
+    function clean(n) { var c = Object.assign({}, n); delete c._dirty; delete c._syncedAt; return c; }
     function catLabel(id) { var c = CATEGORIES.find(function(x) { return x.id === id; }); return c ? c.label : ''; }
     function matches(n) {
         if (filter === 'pinned' && !n.pinned) return false;
@@ -109,8 +112,8 @@ var Agenda = (function() {
     function toggleItem(n, itemId) {
         var it = (n.checklist || []).find(function(i) { return i.id === itemId; });
         if (!it) return;
-        it.done = !it.done; n.updated = Date.now();
-        save(); renderAll();
+        it.done = !it.done;
+        changed(n); renderAll();
         if (it.done) UI.toast('✓ ¡Bien hecho! 💖');
     }
 
@@ -345,10 +348,11 @@ var Agenda = (function() {
             collect();
             if (!draft.title && !draft.body.trim() && !draft.checklist.length) { UI.toast('La nota está vacía 🙈', 'info'); return; }
             draft.updated = Date.now();
+            draft._dirty = true;
             var i = notes.findIndex(function(n) { return n.id === draft.id; });
             if (i === -1) notes.push(draft); else notes[i] = draft;
             if (draft.date) { selectedDay = draft.date; calMonth = startOfMonth(parseKey(draft.date)); }
-            save(); renderAll(); close();
+            changed(null); renderAll(); close();
             UI.toast(isNew ? '🎀 Nota guardada' : '💖 Nota actualizada');
         }
         var popLayer = UI.pushLayer(tryClose);
@@ -366,6 +370,7 @@ var Agenda = (function() {
         if (del) del.addEventListener('click', async function() {
             if (!(await UI.confirm('Esta nota se borrará para siempre.', { title: '¿Eliminar nota?', okText: 'Eliminar', danger: true }))) return;
             notes = notes.filter(function(n) { return n.id !== draft.id; });
+            Data.addTombstone('agenda_notes', draft.id).then(function() { Sync.schedule(); });
             save(); renderAll(); close();
             UI.toast('🗑️ Nota eliminada', 'info');
         });
@@ -394,6 +399,34 @@ var Agenda = (function() {
             renderHero();
         });
         renderChips();
+        Sync.register({
+            table: 'agenda_notes',
+            list: function() { return notes; },
+            stamp: function(n) { return n.updated || 0; },
+            isDirty: function(n) { return !!n._dirty || !n._syncedAt; },
+            toData: clean,
+            markClean: function(items) {
+                var now = Date.now();
+                items.forEach(function(it) { var n = notes.find(function(x) { return x.id === it.id; }); if (n && n.updated === it.stamp) { n._dirty = false; n._syncedAt = now; } });
+                return save();
+            },
+            resetMarks: function() { notes.forEach(function(n) { n._syncedAt = null; }); return save(); },
+            applyRemote: function(rows) {
+                var now = Date.now(), any = false;
+                rows.forEach(function(row) {
+                    var i = notes.findIndex(function(x) { return x.id === row.id; }), local = notes[i], stamp = +row.client_updated_at || 0;
+                    if (row.deleted) {
+                        if (local && !(local._dirty && (local.updated || 0) > stamp)) { notes.splice(i, 1); any = true; }
+                        return;
+                    }
+                    var data = Object.assign({}, row.data, { id: row.id, updated: stamp, _dirty: false, _syncedAt: now });
+                    if (!local) { notes.push(data); any = true; }
+                    else if (stamp > (local.updated || 0)) { notes[i] = data; any = true; }
+                    else if (stamp === local.updated) { local._dirty = false; local._syncedAt = local._syncedAt || now; }
+                });
+                return save().then(function() { if (any && !document.querySelector('.k-editor-overlay')) renderAll(); });
+            }
+        });
         return localforage.getItem(STORE_KEY).then(function(v) { notes = v || []; renderAll(); });
     }
 
@@ -401,6 +434,23 @@ var Agenda = (function() {
         init: init,
         refresh: renderAll,
         getNotes: function() { return notes; },
-        setNotes: function(list) { notes = list || []; return save().then(renderAll); }
+        setNotes: function(list) { notes = list || []; return save().then(renderAll); },
+        // Importa notas de un respaldo: 'merge' conserva la versión más reciente; 'replace' deja solo las del respaldo
+        importNotes: async function(list, mode) {
+            list = (list || []).map(function(n) { var c = clean(n); c._dirty = true; return c; });
+            if (mode === 'replace') {
+                var keep = list.map(function(n) { return n.id; });
+                for (var i = 0; i < notes.length; i++) if (keep.indexOf(notes[i].id) === -1) await Data.addTombstone('agenda_notes', notes[i].id);
+                notes = list;
+            } else {
+                list.forEach(function(n) {
+                    var i = notes.findIndex(function(x) { return x.id === n.id; });
+                    if (i === -1) notes.push(n); else if ((n.updated || 0) > (notes[i].updated || 0)) notes[i] = n;
+                });
+            }
+            await save();
+            Sync.schedule();
+            renderAll();
+        }
     };
 })();
