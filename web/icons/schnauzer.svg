@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fondo -->
+  <rect width="512" height="512" rx="112" fill="#FFD6E4"/>
+  <circle cx="256" cy="256" r="200" fill="#FFE9F1"/>
+  <g id="dog">
+    <!-- Orejas dobladas -->
+    <path d="M168 150 C120 150 92 196 104 252 C130 236 160 214 190 186 Z" fill="#4E535C"/>
+    <path d="M344 150 C392 150 420 196 408 252 C382 236 352 214 322 186 Z" fill="#4E535C"/>
+    <!-- Cabeza -->
+    <path d="M166 176 C166 128 206 110 256 110 C306 110 346 128 346 176 L350 300 C350 340 310 356 256 356 C202 356 162 340 162 300 Z" fill="#7D838E"/>
+    <!-- Franja clara de la frente -->
+    <path d="M238 118 C246 112 266 112 274 118 L268 200 L244 200 Z" fill="#949AA4"/>
+    <!-- Barba -->
+    <path d="M164 268 C146 318 164 378 200 398 C210 408 222 400 230 410 C238 420 250 414 256 422 C262 414 274 420 282 410 C290 400 302 408 312 398 C348 378 366 318 348 268 C318 254 292 260 256 260 C220 260 194 254 164 268 Z" fill="#ECEDF0"/>
+    <path d="M194 340 L204 384 M226 348 L232 400 M286 348 L280 400 M318 340 L308 384" stroke="#C9CCD2" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <!-- Lengüita -->
+    <path d="M244 318 C244 342 268 342 268 318 Z" fill="#FF7FA6"/>
+    <!-- Bigote -->
+    <path d="M256 290 C226 280 190 286 176 312 C200 316 232 318 256 306 C280 318 312 316 336 312 C322 286 286 280 256 290 Z" fill="#F7F7F9"/>
+    <!-- Cejas pobladas -->
+    <path d="M176 222 C186 190 222 182 248 204 C240 206 234 210 230 216 C214 206 196 210 184 226 Z" fill="#ECEDF0"/>
+    <path d="M336 222 C326 190 290 182 264 204 C272 206 278 210 282 216 C298 206 316 210 328 226 Z" fill="#ECEDF0"/>
+    <!-- Ojos -->
+    <circle cx="214" cy="240" r="15" fill="#1E1F24"/>
+    <circle cx="298" cy="240" r="15" fill="#1E1F24"/>
+    <circle cx="219" cy="235" r="5" fill="#FFFFFF"/>
+    <circle cx="303" cy="235" r="5" fill="#FFFFFF"/>
+    <!-- Nariz -->
+    <path d="M226 268 C226 254 286 254 286 268 C286 284 270 292 256 292 C242 292 226 284 226 268 Z" fill="#1E1F24"/>
+    <ellipse cx="246" cy="264" rx="8" ry="4" fill="#5A5D66"/>
+    <!-- Moño rojo -->
+    <g transform="translate(356 128) rotate(18)">
+      <path d="M0 0 C-30 -32 -58 -10 -46 14 C-38 30 -14 20 0 0 Z" fill="#E8274B"/>
+      <path d="M0 0 C30 -32 58 -10 46 14 C38 30 14 20 0 0 Z" fill="#E8274B"/>
+      <circle cx="0" cy="0" r="12" fill="#FF4D6D"/>
+      <circle cx="-4" cy="-4" r="3" fill="#FFFFFF" opacity=".7"/>
+    </g>
+  </g>
+</svg>

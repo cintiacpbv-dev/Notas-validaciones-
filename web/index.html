@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Mis Notas">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#FF8FB1">
+    <meta name="description" content="Editor de validaciones sobre PDF y agenda personal de notas">
+    <title>Mis Notas</title>
+    <link rel="icon" type="image/svg+xml" href="icons/schnauzer.svg">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/agenda.css">
+    <script src="vendor/pdf.min.js"></script>
+    <script src="vendor/localforage.min.js"></script>
+    <script src="vendor/jszip.min.js"></script>
+</head>
+<body>
+    <div class="app-shell">
+        <!-- Navegación principal: barra inferior en celular, riel lateral en tablet/PC -->
+        <nav class="main-nav" id="main-nav" aria-label="Secciones">
+            <div class="nav-brand">
+                <img src="icons/schnauzer.svg" alt="" class="nav-logo">
+                <span class="nav-brand-text">Mis Notas</span>
+            </div>
+            <button class="nav-item active" data-section="validaciones">
+                <span class="nav-icon">📋</span><span class="nav-label">Validaciones</span>
+            </button>
+            <button class="nav-item" data-section="agenda">
+                <span class="nav-icon">🎀</span><span class="nav-label">Mi Agenda</span>
+            </button>
+            <div class="nav-spacer"></div>
+            <button class="nav-item nav-item-theme js-theme-toggle" title="Cambiar tema">
+                <span class="nav-icon js-theme-icon">🌙</span><span class="nav-label">Tema</span>
+            </button>
+        </nav>
+
+        <main class="app-main">
+            <!-- ============ VALIDACIONES ============ -->
+            <section id="section-validaciones" class="section">
+                <div id="view-dashboard" class="view">
+                    <header class="topbar">
+                        <h1><span class="hide-xs">📋 </span>Validaciones</h1>
+                        <div class="header-actions">
+                            <button class="btn-icon" id="btn-export" title="Exportar respaldo">📤<span class="btn-text">Exportar</span></button>
+                            <button class="btn-icon" id="btn-import" title="Importar respaldo">📥<span class="btn-text">Importar</span></button>
+                            <button class="btn" id="btn-new-project">＋<span class="hide-xs"> Nuevo</span></button>
+                        </div>
+                    </header>
+                    <div class="dashboard-content">
+                        <div class="section-header">
+                            <h2 class="section-title">📁 Mis Proyectos</h2>
+                            <input type="search" id="project-search" class="search-input" placeholder="🔍 Buscar proyecto...">
+                        </div>
+                        <div class="project-grid" id="project-list-container">
+                            <div class="empty-state"><div class="empty-icon">📭</div><p>No hay proyectos aún</p></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="view-editor" class="view hidden">
+                    <header class="topbar">
+                        <button class="btn btn-secondary" id="btn-back-dashboard" title="Volver">←<span class="hide-xs"> Panel</span></button>
+                        <h1 id="editor-project-title">Proyecto</h1>
+                        <div class="header-actions">
+                            <button class="btn-icon js-theme-toggle editor-theme" title="Tema"><span class="js-theme-icon">🌙</span></button>
+                            <button class="btn btn-success" id="btn-save-exit">💾<span class="hide-xs"> Guardar</span></button>
+                        </div>
+                    </header>
+                    <div class="pdf-controls">
+                        <div class="page-nav">
+                            <button id="pdf-prev" title="Página anterior">◀</button>
+                            <span class="page-indicator">Pág <strong id="pdf-current-page">0</strong>/<strong id="pdf-total-pages">0</strong></span>
+                            <button id="pdf-next" title="Página siguiente">▶</button>
+                        </div>
+                        <div class="zoom-controls">
+                            <button class="btn-icon" id="btn-zoom-out" title="Alejar">➖</button>
+                            <span class="zoom-level" id="zoom-level">100%</span>
+                            <button class="btn-icon" id="btn-zoom-in" title="Acercar">➕</button>
+                            <button class="btn-icon" id="btn-zoom-fit" title="Ajustar al ancho">↔️</button>
+                        </div>
+                    </div>
+                    <div class="editor-main" id="editor-main-container">
+                        <div id="pdf-upload-loader">
+                            <div class="empty-state"><div class="empty-icon">📄</div><p style="font-weight:600;">Carga un PDF</p>
+                                <label for="file-pdf" class="btn" style="margin-top:12px;">Seleccionar</label>
+                                <input type="file" id="file-pdf" accept="application/pdf">
+                            </div>
+                        </div>
+                        <div id="pdf-container" style="display:none;">
+                            <canvas id="pdf-canvas"></canvas>
+                            <div class="textLayer" id="pdf-text-layer"></div>
+                            <div class="annotation-layer-div" id="annotation-layer"></div>
+                        </div>
+                    </div>
+                    <input type="file" accept="image/*,video/*" capture="environment" id="file-camera">
+                    <input type="file" accept="image/*,video/*" id="file-gallery">
+                    <nav class="bottom-dock" aria-label="Herramientas">
+                        <button class="dock-btn" id="btn-dock-camera"><div class="dock-icon">📸</div><span>Foto</span></button>
+                        <button class="dock-btn dock-btn-primary" id="btn-dock-note" title="Arrastra al documento"><div class="dock-icon">📝</div><span>Nota</span></button>
+                        <button class="dock-btn dock-btn-danger" id="btn-dock-replacement" title="Selecciona texto y pulsa"><div class="dock-icon">✏️</div><span>Reemp.</span></button>
+                        <button class="dock-btn" id="btn-dock-audio"><div class="dock-icon" id="audio-icon">🎤</div><span>Audio</span></button>
+                        <button class="dock-btn" id="btn-dock-timer"><div class="dock-icon">⏱️</div><span>Tiempo</span></button>
+                    </nav>
+                </div>
+                <input type="file" id="file-import" accept=".zip,application/zip">
+            </section>
+
+            <!-- ============ AGENDA ============ -->
+            <section id="section-agenda" class="section kawaii hidden">
+                <header class="k-header">
+                    <div class="k-title">
+                        <svg class="k-bow" viewBox="0 0 64 40" aria-hidden="true"><path d="M32 20C22 4 4 2 4 20s18 16 28 0z" /><path d="M32 20C42 4 60 2 60 20s-18 16-28 0z" /><circle cx="32" cy="20" r="7" class="k-bow-knot" /></svg>
+                        <h1>Mi Agenda</h1>
+                    </div>
+                    <div class="k-header-actions">
+                        <input type="search" id="k-search" class="k-search" placeholder="🔍 Buscar notas...">
+                        <button class="k-btn k-btn-primary" id="k-new-note">＋<span class="hide-xs"> Nota</span></button>
+                    </div>
+                </header>
+
+                <div class="k-scroll" id="k-scroll">
+                    <div class="k-hero" id="k-hero">
+                        <img src="icons/schnauzer.svg" alt="" class="k-mascot">
+                        <div class="k-hero-text">
+                            <p class="k-greeting" id="k-greeting" title="Toca para poner tu nombre">¡Hola!</p>
+                            <p class="k-today" id="k-today"></p>
+                            <p class="k-summary" id="k-summary"></p>
+                        </div>
+                        <span class="k-deco k-deco-1">♥</span><span class="k-deco k-deco-2">★</span><span class="k-deco k-deco-3">✿</span>
+                    </div>
+
+                    <div class="k-tabs" role="tablist">
+                        <button class="k-tab active" data-tab="notes" role="tab">📝 Notas</button>
+                        <button class="k-tab" data-tab="calendar" role="tab">📅 Calendario</button>
+                        <button class="k-tab" data-tab="todo" role="tab">✅ Pendientes</button>
+                    </div>
+
+                    <div class="k-panel" id="k-panel-notes">
+                        <div class="k-chips" id="k-chips"></div>
+                        <div id="k-notes"></div>
+                    </div>
+
+                    <div class="k-panel hidden" id="k-panel-calendar">
+                        <div class="k-cal-layout">
+                            <div class="k-cal">
+                                <div class="k-cal-head">
+                                    <button class="k-icon-btn" id="k-cal-prev" title="Mes anterior">◀</button>
+                                    <h2 id="k-cal-title"></h2>
+                                    <button class="k-icon-btn" id="k-cal-next" title="Mes siguiente">▶</button>
+                                </div>
+                                <div class="k-cal-grid k-cal-weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+                                <div class="k-cal-grid" id="k-cal-days"></div>
+                                <button class="k-link" id="k-cal-today">Ir a hoy 🎀</button>
+                            </div>
+                            <div class="k-day">
+                                <div class="k-day-head">
+                                    <h3 id="k-day-title"></h3>
+                                    <button class="k-btn k-btn-small" id="k-day-add">＋ Nota este día</button>
+                                </div>
+                                <div id="k-day-notes"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="k-panel hidden" id="k-panel-todo">
+                        <div id="k-todo"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="timer-modal" class="modal-overlay hidden">
+        <div class="timer-modal">
+            <h3 style="color:var(--text-secondary);">⏱️ Cronómetro</h3>
+            <div class="timer-display" id="timer-display">00:00.00</div>
+            <div class="timer-buttons">
+                <button class="btn" id="btn-timer-start">▶ Iniciar</button>
+                <button class="btn btn-danger hidden" id="btn-timer-stop">⏹ Parar</button>
+                <button class="btn btn-success" id="btn-timer-save" disabled>💾 Guardar</button>
+                <button class="btn btn-secondary" id="btn-timer-cancel">✖</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/ui.js"></script>
+    <script src="js/validaciones.js"></script>
+    <script src="js/agenda.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+// La versión se puede sobreescribir desde CI: ./gradlew assembleRelease -PversionCode=5 -PversionName=1.0.5
+def appVersionCode = (project.findProperty('versionCode') ?: '1').toString().toInteger()
+def appVersionName = (project.findProperty('versionName') ?: '1.0.0').toString()
+
+android {
+    namespace 'com.cintia.misnotas'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.cintia.misnotas'
+        minSdk 24
+        targetSdk 35
+        versionCode appVersionCode
+        versionName appVersionName
+    }
+
+    signingConfigs {
+        release {
+            // Si existen los secretos de GitHub (KEYSTORE_*) se usan; si no, la llave incluida en el repo.
+            storeFile file(System.getenv('KEYSTORE_FILE') ?: 'keystore/misnotas.jks')
+            storePassword System.getenv('KEYSTORE_PASSWORD') ?: 'misnotas2026'
+            keyAlias System.getenv('KEY_ALIAS') ?: 'misnotas'
+            keyPassword System.getenv('KEY_PASSWORD') ?: 'misnotas2026'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    // La app web (carpeta /web del repo) se empaqueta tal cual dentro del APK.
+    sourceSets {
+        main {
+            assets.srcDirs = ['../../web']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.activity:activity:1.9.3'
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
