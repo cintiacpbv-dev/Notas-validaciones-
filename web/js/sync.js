@@ -2,13 +2,16 @@
    Estrategia "local primero": todo se guarda en el dispositivo y, si hay sesión
    y conexión, se envían los cambios y se reciben los de otros dispositivos.
    Conflictos: gana la versión modificada más recientemente.
-   Solo se sincroniza JSON: el PDF y la multimedia nunca salen del dispositivo. */
+   Se sincroniza el JSON de proyectos y agenda, y los PDF (Supabase Storage,
+   carpeta privada por usuario). Fotos, videos y audios nunca salen del dispositivo. */
 var Sync = (function() {
     var CFG_KEY = 'misnotas-supabase-config';
     var SES_KEY = 'misnotas-supabase-session';
     var CUR_KEY = 'misnotas-sync-cursors';
     var LAST_KEY = 'misnotas-last-sync';
     var PAGE = 1000, CHUNK = 50;
+    var BUCKET = 'documentos';
+    var warning = '';
 
     var adapters = [];
     var listeners = [];
@@ -127,6 +130,55 @@ var Sync = (function() {
         return method === 'GET' ? res.json() : null;
     }
 
+    // ---------- Almacenamiento de archivos (Supabase Storage) ----------
+    function encodePath(path) { return path.split('/').map(encodeURIComponent).join('/'); }
+    async function storageFetch(method, path, opts, retried) {
+        opts = opts || {};
+        var c = config(), t = await token(), res;
+        var headers = Object.assign({ apikey: c.key, Authorization: 'Bearer ' + t }, opts.headers || {});
+        try { res = await fetch(c.url + '/storage/v1/' + path, { method: method, headers: headers, body: opts.body }); }
+        catch (e) { var ne = new Error('Sin conexión'); ne.offline = true; throw ne; }
+        if (res.status === 401 && !retried) { await refreshToken(); return storageFetch(method, path, opts, true); }
+        if (!res.ok) {
+            var d = await res.json().catch(function() { return {}; });
+            var msg = d.message || d.error || ('Error ' + res.status);
+            var err = new Error(msg);
+            err.status = +d.statusCode || res.status;
+            if (/bucket not found/i.test(msg)) err.bucketMissing = true;
+            if (err.status === 413 || /too large|maximum allowed size|exceeded/i.test(msg)) err.tooLarge = true;
+            throw err;
+        }
+        return res;
+    }
+    var storage = {
+        upload: function(path, blob, mime) {
+            return storageFetch('POST', 'object/' + BUCKET + '/' + encodePath(path), {
+                headers: { 'Content-Type': mime || blob.type || 'application/octet-stream', 'x-upsert': 'true', 'cache-control': '3600' },
+                body: blob
+            });
+        },
+        // Descarga con progreso (onProgress recibe 0..1 cuando el servidor informa el tamaño)
+        download: async function(path, onProgress) {
+            var res = await storageFetch('GET', 'object/authenticated/' + BUCKET + '/' + encodePath(path));
+            var total = +res.headers.get('content-length') || 0, type = res.headers.get('content-type') || 'application/pdf';
+            if (!res.body || !res.body.getReader) return res.blob();
+            var reader = res.body.getReader(), chunks = [], got = 0;
+            for (;;) {
+                var r = await reader.read();
+                if (r.done) break;
+                chunks.push(r.value); got += r.value.length;
+                if (onProgress && total) onProgress(Math.min(1, got / total), got, total);
+            }
+            return new Blob(chunks, { type: type.split(';')[0] });
+        },
+        remove: function(paths) {
+            return storageFetch('DELETE', 'object/' + BUCKET, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefixes: paths }) });
+        }
+    };
+    // Aviso no fatal (p. ej. un PDF demasiado grande): se muestra pero la sincronización continúa
+    function warn(msg) { warning = msg; }
+    function progress(msg) { if (state.status === 'syncing') setState('syncing', msg); }
+
     // ---------- Motor de sincronización ----------
     // adapter: { table, list(), stamp(item), isDirty(item), toData(item), markClean([{id, stamp}]), applyRemote(rows), resetMarks() }
     function register(adapter) { adapters.push(adapter); }
@@ -149,7 +201,9 @@ var Sync = (function() {
             }
             if (rows.length < PAGE) break;
         }
-        // 2) Enviar cambios locales y borrados
+        // 2) Subir archivos (PDF) que el adaptador necesite antes de enviar el JSON
+        if (a.beforePush) await a.beforePush();
+        // 3) Enviar cambios locales y borrados
         var uidv = user().id;
         var dirty = a.list().filter(a.isDirty);
         var tombs = await Data.tombstones(a.table);
@@ -172,16 +226,19 @@ var Sync = (function() {
         if (!navigator.onLine) return setState('offline');
         if (running) { again = true; return; }
         running = true;
+        warning = '';
         setState('syncing');
         try {
             for (var i = 0; i < adapters.length; i++) await syncTable(adapters[i]);
             state.lastSync = Date.now();
             Data.ls(LAST_KEY, String(state.lastSync));
-            setState('synced');
+            if (warning) setState('error', warning); else setState('synced');
+            adapters.forEach(function(a) { if (a.afterSync) { try { a.afterSync(); } catch (e) {} } });
         } catch (e) {
             console.warn('Sync', e);
             if (e.offline) setState('offline');
             else if (e.auth) setState('signed-out', e.message);
+            else if (e.bucketMissing) setState('error', 'Falta el espacio "documentos" en Supabase Storage: ejecuta de nuevo supabase/schema.sql.');
             else if (e.code === '42P01' || e.code === 'PGRST205' || e.status === 404) setState('error', 'Faltan las tablas en Supabase: ejecuta el archivo supabase/schema.sql en el editor SQL.');
             else if (e.status === 403 || e.code === '42501') setState('error', 'Supabase rechazó los datos (revisa las políticas RLS del schema.sql).');
             else setState('error', e.message);
@@ -237,7 +294,7 @@ var Sync = (function() {
                 var h = '<div class="ui-head"><h3>Nube y dispositivo</h3><button class="ui-x" data-close aria-label="Cerrar">' + Icons.svg('close') + '</button></div>';
                 h += statusHtml();
                 if (!configured()) {
-                    h += '<p class="ui-help">Conecta tu proyecto de <b>Supabase</b> para guardar tus proyectos y tu agenda también en la nube y verlos en otros dispositivos. Los PDF, fotos, videos y audios se quedan en el dispositivo donde se capturaron.</p>' +
+                    h += '<p class="ui-help">Conecta tu proyecto de <b>Supabase</b> para guardar tus proyectos, sus PDF y tu agenda también en la nube y verlos en otros dispositivos. Las fotos, videos y audios se quedan en el dispositivo donde se capturaron.</p>' +
                         '<label class="ui-field"><span>URL del proyecto</span><input data-url type="url" inputmode="url" placeholder="https://xxxxxxxx.supabase.co" value="' + esc(c.url) + '"></label>' +
                         '<label class="ui-field"><span>Clave pública (anon key)</span><input data-key type="text" autocomplete="off" spellcheck="false" placeholder="eyJhbGciOi…" value="' + esc(c.key) + '"></label>' +
                         '<div class="ui-actions"><button class="btn" data-save-cfg>Conectar</button></div>';
@@ -314,6 +371,7 @@ var Sync = (function() {
 
     return {
         register: register, syncNow: syncNow, schedule: schedule, onChange: onChange, state: function() { return state; },
+        storage: storage, warn: warn, progress: progress,
         label: label, relTime: relTime, configured: configured, user: user, openSettings: openSettings,
         signIn: signIn, signUp: signUp, signOut: signOut, setConfig: setConfig
     };

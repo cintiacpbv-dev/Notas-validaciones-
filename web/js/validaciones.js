@@ -31,7 +31,8 @@ var Validaciones = (function() {
     var tool = 'select', pendingPoint = null, selectedId = null, panelOpen = false;
     var dash = { q: '', filter: 'all', sort: 'recent' };
     var pf = { status: 'all', type: 'all' };
-    var urlCache = {}, saveTimer = null, textTimer = null;
+    var urlCache = {}, saveTimer = null, textTimer = null, downloads = {}, prefetching = false, warnedTooLarge = {};
+    var DELETES_KEY = 'misnotas-storage-deletes';
     var esc = UI.escapeHtml, ic = Icons.svg;
     var $ = function(id) { return document.getElementById(id); };
 
@@ -79,6 +80,42 @@ var Validaciones = (function() {
         if (!b) return null;
         return (urlCache[key] = URL.createObjectURL(b));
     }
+    // Versión del PDF: su huella SHA-256 (o un id si el navegador no puede calcularla)
+    function pdfVer(p) { return p.pdf ? (p.pdf.hash || p.pdf.ver || 'v0') : null; }
+    function ownPath(path) { var u = Sync.user(); return !!(u && path && path.indexOf(u.id + '/') === 0); }
+    function pdfInCloud(p) { return !!(p.pdf && p.pdf.remotePath && p.pdf.remoteHash === pdfVer(p)); }
+    function pendingDeletes() { try { return JSON.parse(Data.ls(DELETES_KEY) || '[]'); } catch (e) { return []; } }
+    function queueDelete(path) { var l = pendingDeletes(); if (l.indexOf(path) === -1) l.push(path); Data.ls(DELETES_KEY, JSON.stringify(l)); }
+    function clearDeletes(done) { Data.ls(DELETES_KEY, JSON.stringify(pendingDeletes().filter(function(x) { return done.indexOf(x) === -1; }))); }
+    function canPrefetch() {
+        var c = navigator.connection;
+        return !c || (!c.saveData && c.type !== 'cellular');
+    }
+    // Descarga el PDF de un proyecto desde la nube (una sola descarga a la vez por proyecto)
+    function downloadPdf(p, onProgress) {
+        if (downloads[p.id]) return downloads[p.id];
+        var path = p.pdf.remotePath;
+        downloads[p.id] = Sync.storage.download(path, onProgress).then(async function(blob) {
+            if (p.pdf && p.pdf.remotePath === path) {
+                await Data.putPdf(p.id, new Blob([blob], { type: 'application/pdf' }));
+                localPdfs[p.id] = true;
+            }
+            return blob;
+        }).finally(function() { delete downloads[p.id]; });
+        return downloads[p.id];
+    }
+    async function prefetchPdfs() {
+        if (prefetching || !Sync.user() || !canPrefetch()) return;
+        prefetching = true;
+        try {
+            var todo = projects.filter(function(p) { return p.pdf && !localPdfs[p.id] && pdfInCloud(p) && ownPath(p.pdf.remotePath) && (p.pdf.size || 0) < 40e6; });
+            for (var i = 0; i < todo.length; i++) {
+                try { await downloadPdf(todo[i]); } catch (e) { if (e.offline) break; }
+            }
+            if (todo.length && !isEditorOpen()) renderDashboard();
+        } finally { prefetching = false; }
+    }
+
     function toBlob(f, type) { return f.arrayBuffer().then(function(b) { return new Blob([b], { type: type || f.type || 'application/octet-stream' }); }); }
 
     // ---------- Guardado local y sincronización ----------
@@ -109,7 +146,10 @@ var Validaciones = (function() {
         await Data.delPdf(p.id);
         delete localPdfs[p.id];
         projects = projects.filter(function(x) { return x !== p; });
-        if (tombstone) await Data.addTombstone(TABLE, p.id);
+        if (tombstone) {
+            await Data.addTombstone(TABLE, p.id);
+            if (p.pdf && p.pdf.remotePath && ownPath(p.pdf.remotePath)) queueDelete(p.pdf.remotePath);
+        }
     }
     function revoke(key) { if (urlCache[key]) { URL.revokeObjectURL(urlCache[key]); delete urlCache[key]; } }
 
@@ -125,10 +165,63 @@ var Validaciones = (function() {
             return persist(true);
         },
         resetMarks: function() { projects.forEach(function(p) { p._syncedAt = null; }); return persist(true); },
+        beforePush: async function() {
+            var u = Sync.user();
+            if (!u) return;
+            var dels = pendingDeletes().filter(function(x) { return x.indexOf(u.id + '/') === 0; });
+            if (dels.length) {
+                try { await Sync.storage.remove(dels); clearDeletes(dels); }
+                catch (e) { if (e.offline || e.auth) throw e; }
+            }
+            for (var i = 0; i < projects.length; i++) {
+                var p = projects[i];
+                if (!p.pdf || !localPdfs[p.id]) continue;
+                var ver = pdfVer(p);
+                if (p.pdf.remotePath && ownPath(p.pdf.remotePath) && p.pdf.remoteHash === ver) continue;
+                if (p.pdf.skipUpload === ver) continue;
+                var blob = await Data.getPdf(p.id);
+                if (!blob) continue;
+                var path = u.id + '/' + p.id + '/' + String(ver).slice(0, 40) + '.pdf';
+                Sync.progress('Subiendo «' + p.pdf.name + '»');
+                try { await Sync.storage.upload(path, blob, 'application/pdf'); }
+                catch (e) {
+                    if (e.offline || e.auth) throw e;
+                    if (e.bucketMissing) throw e;
+                    if (e.tooLarge) {
+                        p.pdf.skipUpload = ver;
+                        Sync.warn('«' + p.pdf.name + '» es demasiado grande para tu plan de Supabase; se queda solo en este dispositivo.');
+                        if (!warnedTooLarge[p.id]) { warnedTooLarge[p.id] = true; UI.toast('El PDF es demasiado grande para subirlo a la nube', 'error'); }
+                        continue;
+                    }
+                    Sync.warn('No se pudo subir «' + p.pdf.name + '»: ' + e.message);
+                    continue;
+                }
+                var old = p.pdf.remotePath;
+                p.pdf.remotePath = path;
+                p.pdf.remoteHash = ver;
+                delete p.pdf.skipUpload;
+                if (old && old !== path && ownPath(old)) queueDelete(old);
+                touch(p, { quiet: true });
+                if (p === current) renderDocline();
+            }
+            var more = pendingDeletes().filter(function(x) { return x.indexOf(u.id + '/') === 0; });
+            if (more.length) { try { await Sync.storage.remove(more); clearDeletes(more); } catch (e) { if (e.offline) throw e; } }
+        },
+        afterSync: function() {
+            if (!isEditorOpen()) renderDashboard();
+            prefetchPdfs();
+        },
         applyRemote: async function(rows) {
-            var now = Date.now(), changed = false, curChanged = false, curRemoved = false;
+            var now = Date.now(), changed = false, curChanged = false, curRemoved = false, pdfChanged = false;
+            var tombs = await Data.tombstones(TABLE), revived = [];
             for (var i = 0; i < rows.length; i++) {
                 var row = rows[i], local = byId(row.id), stamp = +row.client_updated_at || 0;
+                var tomb = tombs.find(function(t) { return t.id === row.id; });
+                if (tomb && !row.deleted) {
+                    // Borrado aquí y aún sin enviar: gana el borrado salvo que la nube tenga un cambio posterior
+                    if (stamp <= tomb.at) continue;
+                    revived.push(row.id);
+                }
                 if (row.deleted) {
                     if (local && !(local._dirty && (local.updatedAt || 0) > stamp)) {
                         if (local === current) curRemoved = true;
@@ -146,10 +239,21 @@ var Validaciones = (function() {
                     projects.push(data);
                     changed = true;
                 } else if (stamp > (local.updatedAt || 0)) {
+                    var oldPdf = local.pdf ? JSON.parse(JSON.stringify(local.pdf)) : null, oldVer = pdfVer(local);
+                    var pendingUpload = oldPdf && localPdfs[local.id] && oldPdf.remoteHash !== oldVer;
                     Object.keys(local).forEach(function(k) { delete local[k]; });
                     Object.assign(local, data);
                     await Data.migrateProject(local);
                     local.updatedAt = stamp; local._dirty = false; local._syncedAt = now;
+                    if (pendingUpload) {
+                        // Se adjuntó un PDF aquí que aún no se sube: se conserva y se enviará en esta sincronización
+                        local.pdf = oldPdf; local._dirty = true; local.updatedAt = now;
+                    } else if (localPdfs[local.id] && pdfVer(local) !== oldVer) {
+                        // Otro dispositivo cambió el PDF: se descarta la copia local vieja
+                        await Data.delPdf(local.id);
+                        delete localPdfs[local.id];
+                        if (local === current) pdfChanged = true;
+                    }
                     if (local === current) curChanged = true;
                     changed = true;
                 } else if (stamp === local.updatedAt) {
@@ -157,9 +261,11 @@ var Validaciones = (function() {
                     local._syncedAt = local._syncedAt || now;
                 }
             }
+            if (revived.length) await Data.clearTombstones(TABLE, revived);
             await persist(true);
             if (!changed) return;
             if (curRemoved) { closeEditor(); UI.toast('Este proyecto se eliminó desde otro dispositivo', 'info'); }
+            else if (pdfChanged) { refreshFromRemote(); pdfDoc = null; loadDocument(); UI.toast('El PDF se actualizó desde otro dispositivo', 'info'); }
             else if (curChanged) refreshFromRemote();
             if (!isEditorOpen()) renderDashboard();
         }
@@ -213,9 +319,14 @@ var Validaciones = (function() {
 
     function rowHtml(p) {
         var st = stats(p), pct = st.total ? Math.round(st.done / st.total * 100) : 0, hasPdf = !!localPdfs[p.id];
-        var sheet = !p.pdf ? '<span class="vx-sheet is-empty">PDF</span>' : '<span class="vx-sheet' + (hasPdf ? '' : ' is-remote') + '">PDF</span>';
+        var sheet = !p.pdf ? '<span class="vx-sheet is-empty">PDF</span>' : '<span class="vx-sheet' + (hasPdf || pdfInCloud(p) ? '' : ' is-remote') + '">PDF</span>';
         var docName = p.pdf ? esc(p.pdf.name) : 'Sin documento';
-        var docMeta = p.pdf ? ((p.pdf.pages ? p.pdf.pages + ' págs.' : '') + (hasPdf ? '' : (p.pdf.pages ? ' · ' : '') + 'en otro dispositivo')) : 'Agrega un PDF';
+        var where = '';
+        if (p.pdf) {
+            if (!hasPdf) where = pdfInCloud(p) ? 'en la nube' : 'en otro dispositivo';
+            else if (Sync.user()) where = pdfInCloud(p) ? 'respaldado' : 'por subir';
+        }
+        var docMeta = p.pdf ? [p.pdf.pages ? p.pdf.pages + ' págs.' : '', where].filter(Boolean).join(' · ') : 'Agrega un PDF';
         var prog = st.total
             ? '<div class="vx-progress"><div class="vx-bar"><i style="width:' + pct + '%"></i></div><div class="vx-progress-text"><span><b>' + st.done + '/' + st.total + '</b> resueltas</span>' +
               (st.open ? '<span class="vx-chip vx-chip-warn">' + st.open + (st.open === 1 ? ' pendiente' : ' pendientes') + '</span>' : '<span class="vx-chip vx-chip-ok">' + ic('check') + 'Completado</span>') + '</div></div>'
@@ -223,7 +334,7 @@ var Validaciones = (function() {
         var pendingSync = p._dirty && Sync.user() ? '<span class="vx-chip" title="Se enviará a la nube cuando haya conexión">' + ic('sync') + 'Por sincronizar</span>' : '';
         return '<div class="vx-row" role="button" tabindex="0" data-id="' + p.id + '">' +
             '<div class="vx-row-main">' + sheet + '<div class="vx-row-text"><span class="vx-row-name">' + esc(p.name || 'Sin nombre') + '</span><span class="vx-row-sub">' + docName + (docMeta ? ' · ' + docMeta : '') + '</span></div></div>' +
-            '<div class="vx-row-doc"><span>' + docName + '</span><small>' + (p.pdf && !hasPdf ? ic('phone') : '') + docMeta + '</small></div>' +
+            '<div class="vx-row-doc"><span>' + docName + '</span><small>' + (p.pdf && where ? ic(where === 'en otro dispositivo' ? 'phone' : where === 'por subir' ? 'upload' : 'cloud') : '') + docMeta + '</small></div>' +
             '<div class="vx-row-prog">' + prog + '</div>' +
             '<div class="vx-row-date"><span>' + Sync.relTime(p.updatedAt) + '</span>' + pendingSync + '</div>' +
             '<button class="vx-btn vx-btn-icon vx-row-more" data-more aria-label="Opciones del proyecto">' + ic('more') + '</button></div>';
@@ -594,7 +705,10 @@ var Validaciones = (function() {
         if (!current) return;
         var p = current, t;
         if (!p.pdf) t = 'Sin documento';
-        else t = p.pdf.name + (p.pdf.pages ? ' · ' + p.pdf.pages + ' págs.' : '') + (localPdfs[p.id] ? '' : ' · PDF en otro dispositivo');
+        else {
+            var where = !localPdfs[p.id] ? (pdfInCloud(p) ? ' · en la nube' : ' · en otro dispositivo') : (Sync.user() ? (pdfInCloud(p) ? ' · respaldado en la nube' : ' · pendiente de subir') : '');
+            t = p.pdf.name + (p.pdf.pages ? ' · ' + p.pdf.pages + ' págs.' : '') + where;
+        }
         $('vx-docline').textContent = t;
     }
 
@@ -610,6 +724,25 @@ var Validaciones = (function() {
         var token = ++loadToken, p = current;
         var blob = await Data.getPdf(p.id);
         if (token !== loadToken) return;
+        if (!blob && pdfInCloud(p)) {
+            if (!Sync.user()) { pdfDoc = null; showNoDoc('signed-out'); return; }
+            if (!ownPath(p.pdf.remotePath)) { pdfDoc = null; showNoDoc(); return; }
+            showNoDoc('downloading');
+            try {
+                blob = await downloadPdf(p, function(f, got, total) {
+                    var bar = document.querySelector('#vx-nodoc .vx-bar i'), txt = document.querySelector('#vx-nodoc [data-dlp]');
+                    if (bar) bar.style.width = Math.round(f * 100) + '%';
+                    if (txt) txt.textContent = Data.formatBytes(got) + ' de ' + Data.formatBytes(total);
+                });
+            } catch (e) {
+                if (token !== loadToken) return;
+                pdfDoc = null;
+                showNoDoc(e.offline ? 'offline' : 'cloud-error', e.message);
+                return;
+            }
+            if (token !== loadToken) return;
+            renderDocline();
+        }
         if (!blob) { pdfDoc = null; showNoDoc(); return; }
         $('vx-nodoc').classList.add('hidden');
         $('pdf-container').classList.remove('hidden');
@@ -624,6 +757,7 @@ var Validaciones = (function() {
             $('vx-pages').textContent = doc.numPages;
             await fitScale(false);
             renderPage(clamp(page, 1, doc.numPages));
+            if (!selectedId) renderList();
         } catch (e) {
             console.error(e);
             pdfDoc = null;
@@ -631,17 +765,38 @@ var Validaciones = (function() {
         }
     }
 
-    function showNoDoc(kind) {
+    function showNoDoc(kind, detail) {
         $('pdf-container').classList.add('hidden');
         $('annotation-layer').innerHTML = '';
         var n = $('vx-nodoc'), p = current, h;
+        var size = p.pdf && p.pdf.size ? Data.formatBytes(p.pdf.size) : '';
+        if (kind === 'downloading') {
+            h = '<div class="vx-nodoc-ic">' + ic('download') + '</div><h3>Descargando el documento</h3><p>«' + esc(p.pdf.name) + '»' + (size ? ' · ' + size : '') + ' desde tu nube. Después quedará guardado en este dispositivo.</p>' +
+                '<div class="vx-bar" style="margin:4px 0 8px"><i style="width:3%"></i></div><small data-dlp>Conectando…</small>';
+            n.innerHTML = h; n.classList.remove('hidden');
+            return;
+        }
+        if (kind === 'offline' || kind === 'cloud-error' || kind === 'signed-out') {
+            var title = kind === 'offline' ? 'Sin conexión' : kind === 'signed-out' ? 'Inicia sesión para ver el PDF' : 'No se pudo descargar el PDF';
+            var msg = kind === 'offline' ? '«' + esc(p.pdf.name) + '» está en tu nube. Conéctate a internet para descargarlo; las observaciones sí están disponibles.'
+                : kind === 'signed-out' ? '«' + esc(p.pdf.name) + '» está guardado en tu nube de Supabase.'
+                : esc(detail || 'Inténtalo de nuevo en un momento.');
+            h = '<div class="vx-nodoc-ic">' + ic(kind === 'offline' ? 'cloudOff' : kind === 'signed-out' ? 'user' : 'cloudAlert') + '</div><h3>' + title + '</h3><p>' + msg + '</p>' +
+                '<button class="vx-btn vx-btn-primary" data-retry>' + ic(kind === 'signed-out' ? 'sliders' : 'sync') + (kind === 'signed-out' ? 'Nube y cuenta' : 'Reintentar') + '</button>' +
+                '<small>También puedes <button class="ui-link" data-pick>adjuntar el PDF</button> manualmente.</small>';
+            n.innerHTML = h; n.classList.remove('hidden');
+            n.querySelector('[data-retry]').addEventListener('click', function() { if (kind === 'signed-out') Sync.openSettings(); else loadDocument(); });
+            n.querySelector('[data-pick]').addEventListener('click', function() { $('vx-file-pdf').click(); });
+            return;
+        }
         if (kind === 'error') {
             h = '<div class="vx-nodoc-ic">' + ic('alert') + '</div><h3>No se pudo abrir el PDF</h3><p>El archivo parece dañado o protegido. Prueba adjuntarlo de nuevo.</p><button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Adjuntar PDF</button>';
         } else if (p.pdf) {
-            h = '<div class="vx-nodoc-ic">' + ic('phone') + '</div><h3>El PDF está en otro dispositivo</h3><p>«' + esc(p.pdf.name) + '» se cargó en otro equipo. Las observaciones ya están aquí; adjunta el mismo archivo para verlas sobre el documento.</p>' +
-                '<button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Adjuntar PDF</button><small>Por su tamaño, los documentos y la multimedia no se suben a la nube.</small>';
+            var from = p.pdf.device ? '«' + esc(p.pdf.device) + '»' : 'otro equipo';
+            h = '<div class="vx-nodoc-ic">' + ic('phone') + '</div><h3>El PDF aún no está en la nube</h3><p>«' + esc(p.pdf.name) + '» se cargó en ' + from + ' y todavía no se ha subido. Se subirá cuando ese equipo tenga internet y sesión iniciada; mientras tanto puedes adjuntar el mismo archivo aquí.</p>' +
+                '<button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Adjuntar PDF</button>' + (p.pdf.skipUpload ? '<small>Este PDF es demasiado grande para el plan de Supabase.</small>' : '');
         } else {
-            h = '<div class="vx-nodoc-ic">' + ic('filePlus') + '</div><h3>Agrega el documento a revisar</h3><p>Selecciona el PDF de este proyecto. Se guarda solo en este dispositivo.</p>' +
+            h = '<div class="vx-nodoc-ic">' + ic('filePlus') + '</div><h3>Agrega el documento a revisar</h3><p>Selecciona el PDF de este proyecto.' + (Sync.user() ? ' Se guardará en este dispositivo y en tu nube.' : ' Se guarda en este dispositivo.') + '</p>' +
                 '<button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Seleccionar PDF</button>' + (isTouch() ? '' : '<small>También puedes arrastrar el archivo aquí.</small>');
         }
         n.innerHTML = h;
@@ -659,7 +814,12 @@ var Validaciones = (function() {
         }
         await Data.putPdf(p.id, blob);
         localPdfs[p.id] = true;
-        p.pdf = { name: file.name || 'documento.pdf', size: blob.size, pages: p.pdf && p.pdf.hash === hash ? p.pdf.pages : null, hash: hash };
+        var prev = p.pdf || {};
+        p.pdf = {
+            name: file.name || 'documento.pdf', size: blob.size, pages: prev.hash && prev.hash === hash ? prev.pages : null,
+            hash: hash, ver: hash || Data.uid('v'), device: Data.device().name,
+            remotePath: prev.remotePath || null, remoteHash: prev.remoteHash || null
+        };
         touch(p, { quiet: true });
         return true;
     }
@@ -1013,7 +1173,7 @@ var Validaciones = (function() {
         }
         h += '</div>';
         if (!all.length) {
-            h += '<div class="vx-plist-empty">' + ic('marker') + '<p><b>Aún no hay observaciones</b></p><p>' + (pdfDoc ? 'Elige una herramienta y toca el documento, o selecciona texto para tacharlo.' : 'Agrega el PDF para empezar a marcar.') + '</p></div>';
+            h += '<div class="vx-plist-empty">' + ic('marker') + '<p><b>Aún no hay observaciones</b></p><p>' + (pdfDoc ? 'Elige una herramienta y toca el documento, o selecciona texto para tacharlo.' : current.pdf ? 'Cuando el PDF esté disponible podrás marcar sobre él.' : 'Agrega el PDF para empezar a marcar.') + '</p></div>';
         } else if (!list.length) {
             h += '<div class="vx-plist-empty">' + ic('search') + '<p>Nada con este filtro.</p></div>';
         } else {

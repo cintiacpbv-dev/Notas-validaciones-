@@ -411,10 +411,12 @@ var Agenda = (function() {
                 return save();
             },
             resetMarks: function() { notes.forEach(function(n) { n._syncedAt = null; }); return save(); },
-            applyRemote: function(rows) {
-                var now = Date.now(), any = false;
+            applyRemote: async function(rows) {
+                var now = Date.now(), any = false, tombs = await Data.tombstones('agenda_notes'), revived = [];
                 rows.forEach(function(row) {
                     var i = notes.findIndex(function(x) { return x.id === row.id; }), local = notes[i], stamp = +row.client_updated_at || 0;
+                    var tomb = tombs.find(function(t) { return t.id === row.id; });
+                    if (tomb && !row.deleted) { if (stamp <= tomb.at) return; revived.push(row.id); }
                     if (row.deleted) {
                         if (local && !(local._dirty && (local.updated || 0) > stamp)) { notes.splice(i, 1); any = true; }
                         return;
@@ -424,7 +426,9 @@ var Agenda = (function() {
                     else if (stamp > (local.updated || 0)) { notes[i] = data; any = true; }
                     else if (stamp === local.updated) { local._dirty = false; local._syncedAt = local._syncedAt || now; }
                 });
-                return save().then(function() { if (any && !document.querySelector('.k-editor-overlay')) renderAll(); });
+                if (revived.length) await Data.clearTombstones('agenda_notes', revived);
+                await save();
+                if (any && !document.querySelector('.k-editor-overlay')) renderAll();
             }
         });
         return localforage.getItem(STORE_KEY).then(function(v) { notes = v || []; renderAll(); });

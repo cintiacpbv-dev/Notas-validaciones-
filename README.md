@@ -42,13 +42,16 @@ El APK se compila automáticamente con GitHub Actions (`.github/workflows/androi
 ## ☁️ Guardado local + Supabase
 
 - Todo se guarda **siempre en el dispositivo** y funciona sin internet.
-- Si conectas **Supabase**, los proyectos (observaciones, estados, textos) y la agenda se sincronizan entre tus dispositivos.
-- Los **PDF, fotos, videos y audios NO se suben** por su peso: se quedan en el dispositivo donde se capturaron. En los otros equipos aparece el aviso "Guardado en otro dispositivo". Para pasarlos usa **Compartir** o **Exportar proyecto (.json)** con multimedia.
+- Si conectas **Supabase**, se sincronizan entre tus dispositivos:
+  - los proyectos (observaciones, estados, textos) y la agenda;
+  - los **documentos PDF** de cada proyecto (en un espacio privado de Supabase Storage; solo tu cuenta puede verlos). En otro dispositivo el PDF se descarga al abrir el proyecto, o en segundo plano si hay wifi, y queda guardado para usarlo sin internet. Si reemplazas el PDF, los demás equipos reciben la nueva versión.
+- Las **fotos, videos y audios NO se suben** por su peso: se quedan en el dispositivo donde se capturaron (en los otros equipos aparece "Guardado en otro dispositivo"). Para pasarlos usa **Compartir** (WhatsApp, redes, etc.) o **Exportar proyecto (.json)** con multimedia.
+- Límite por PDF: 50 MB (plan gratuito de Supabase). Si un PDF es más grande, se queda solo en el dispositivo y la app te avisa.
 
 ### Conectar Supabase (una sola vez)
 
 1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
-2. Ve a **SQL Editor → New query**, pega el contenido de [`supabase/schema.sql`](supabase/schema.sql) y pulsa **Run**. Crea las tablas y las reglas de seguridad (cada usuario solo ve sus datos).
+2. Ve a **SQL Editor → New query**, pega el contenido de [`supabase/schema.sql`](supabase/schema.sql) y pulsa **Run**. Crea las tablas, el espacio privado `documentos` para los PDF y las reglas de seguridad (cada usuario solo ve sus datos). Si ya lo habías ejecutado antes, vuelve a ejecutarlo para agregar el espacio de PDF (no borra nada).
 3. En **Project Settings → API** copia la **Project URL** y la **anon public key**.
 4. En la app: **Validaciones → botón de nube** (o **⋯ → Nube y dispositivo**), pega la URL y la clave, y pulsa **Conectar**.
 5. Crea tu cuenta con correo y contraseña (o inicia sesión). Si Supabase pide confirmar el correo, confírmalo y vuelve a iniciar sesión.
@@ -67,7 +70,7 @@ web/                 App web (se empaqueta tal cual dentro del APK)
   vendor/            pdf.js, localforage y JSZip (sin depender de internet)
   icons/schnauzer.svg  Icono original del Schnauzer
 android/             Proyecto Android (WebView nativo)
-supabase/schema.sql  Tablas y reglas de seguridad para Supabase
+supabase/schema.sql  Tablas, almacenamiento de PDF y reglas de seguridad para Supabase
 tools/gen-icons.js   Regenera los PNG del icono desde el SVG
 ```
 

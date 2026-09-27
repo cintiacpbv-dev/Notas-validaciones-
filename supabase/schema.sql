@@ -1,8 +1,10 @@
 -- =====================================================================
 --  Mis Notas · esquema para Supabase
 --  Ejecuta este archivo completo en: Supabase → SQL Editor → New query → Run
---  Solo se guarda JSON (proyectos, anotaciones y agenda). Los PDF, fotos,
---  videos y audios se quedan en el dispositivo donde se capturaron.
+--  Se guardan: proyectos y observaciones (JSON), notas de la agenda (JSON)
+--  y los PDF de cada proyecto (Storage, bucket privado "documentos").
+--  Las fotos, videos y audios se quedan en el dispositivo donde se capturaron.
+--  Puedes volver a ejecutarlo sin problema: no borra datos.
 -- =====================================================================
 
 create or replace function public.misnotas_touch_updated_at()
@@ -63,3 +65,24 @@ create policy "an_select_own" on public.agenda_notes for select to authenticated
 create policy "an_insert_own" on public.agenda_notes for insert to authenticated with check (auth.uid() = user_id);
 create policy "an_update_own" on public.agenda_notes for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "an_delete_own" on public.agenda_notes for delete to authenticated using (auth.uid() = user_id);
+
+-- ---------- PDF de los proyectos (Supabase Storage) ----------
+-- Bucket privado: cada usuario solo accede a su carpeta <user_id>/...
+-- Límite de 50 MB por archivo (máximo del plan gratuito).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('documentos', 'documentos', false, 52428800, array['application/pdf'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "docs_select_own" on storage.objects;
+drop policy if exists "docs_insert_own" on storage.objects;
+drop policy if exists "docs_update_own" on storage.objects;
+drop policy if exists "docs_delete_own" on storage.objects;
+create policy "docs_select_own" on storage.objects for select to authenticated
+  using (bucket_id = 'documentos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "docs_insert_own" on storage.objects for insert to authenticated
+  with check (bucket_id = 'documentos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "docs_update_own" on storage.objects for update to authenticated
+  using (bucket_id = 'documentos' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id = 'documentos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "docs_delete_own" on storage.objects for delete to authenticated
+  using (bucket_id = 'documentos' and (storage.foldername(name))[1] = (select auth.uid())::text);
