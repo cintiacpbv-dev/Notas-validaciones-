@@ -21,7 +21,7 @@ android {
     signingConfigs {
         release {
             // Si existen los secretos de GitHub (KEYSTORE_*) se usan; si no, la llave incluida en el repo.
-            storeFile file(System.getenv('KEYSTORE_FILE') ?: 'keystore/misnotas.jks')
+            storeFile System.getenv('KEYSTORE_FILE') ? file(System.getenv('KEYSTORE_FILE')) : rootProject.file('keystore/misnotas.jks')
             storePassword System.getenv('KEYSTORE_PASSWORD') ?: 'misnotas2026'
             keyAlias System.getenv('KEY_ALIAS') ?: 'misnotas'
             keyPassword System.getenv('KEY_PASSWORD') ?: 'misnotas2026'
