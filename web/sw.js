@@ -1,5 +1,5 @@
 /* Service worker para usar la app sin conexión desde el navegador (PC/tablet). */
-var CACHE = 'misnotas-v4';
+var CACHE = 'misnotas-v5';
 var FILES = [
     './', 'index.html', 'manifest.webmanifest',
     'css/app.css', 'css/validaciones.css', 'css/agenda.css',

@@ -16,6 +16,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -75,6 +76,8 @@ public class MainActivity extends ComponentActivity {
     private PermissionRequest pendingWebPermission;
     private int permissionPurpose;
     private boolean captureVideo;
+    private View customView;
+    private WebChromeClient.CustomViewCallback customViewCallback;
 
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private ActivityResultLauncher<String[]> permissionLauncher;
@@ -120,6 +123,7 @@ public class MainActivity extends ComponentActivity {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
+                if (customView != null) { hideCustomView(); return; }
                 webView.evaluateJavascript(
                         "(function(){try{return !!(window.onAndroidBack && window.onAndroidBack());}catch(e){return false;}})()",
                         value -> {
@@ -195,6 +199,25 @@ public class MainActivity extends ComponentActivity {
             });
         }
 
+        // Pantalla completa nativa del reproductor de video
+        @Override
+        public void onShowCustomView(View view, CustomViewCallback callback) {
+            if (customView != null) { callback.onCustomViewHidden(); return; }
+            customView = view;
+            customViewCallback = callback;
+            view.setBackgroundColor(Color.BLACK);
+            root.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            webView.setVisibility(View.GONE);
+            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), root);
+            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            c.hide(WindowInsetsCompat.Type.systemBars());
+        }
+
+        @Override
+        public void onHideCustomView() {
+            hideCustomView();
+        }
+
         @Override
         public void onPermissionRequestCanceled(PermissionRequest request) {
             if (pendingWebPermission == request) pendingWebPermission = null;
@@ -226,6 +249,16 @@ public class MainActivity extends ComponentActivity {
             }
             return true;
         }
+    }
+
+    private void hideCustomView() {
+        if (customView == null) return;
+        root.removeView(customView);
+        customView = null;
+        webView.setVisibility(View.VISIBLE);
+        WindowCompat.getInsetsController(getWindow(), root).show(WindowInsetsCompat.Type.systemBars());
+        if (customViewCallback != null) customViewCallback.onCustomViewHidden();
+        customViewCallback = null;
     }
 
     private boolean has(String permission) {

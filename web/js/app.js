@@ -23,7 +23,8 @@
         var meta = document.querySelector('meta[name="theme-color"]');
         if (!meta) return;
         var dark = document.body.classList.contains('sap-dark');
-        meta.setAttribute('content', currentSection() === 'agenda' ? (dark ? '#8E3558' : '#FF8FB1') : (dark ? '#1A1C20' : '#FFFFFF'));
+        var pink = document.body.classList.contains('sap-pink');
+        meta.setAttribute('content', currentSection() === 'agenda' ? (dark ? '#8E3558' : '#FF8FB1') : (dark ? '#1A1C20' : pink ? '#FFF7FA' : '#FFFFFF'));
     }
     document.querySelectorAll('.nav-item[data-section]').forEach(function(b) {
         b.addEventListener('click', function() { showSection(b.getAttribute('data-section')); });
@@ -33,6 +34,7 @@
     var THEMES = [
         { id: 'light', icon: 'sun', label: 'Claro' },
         { id: 'dark', icon: 'moon', label: 'Oscuro' },
+        { id: 'pink', icon: 'bow', label: 'Rosa' },
         { id: 'auto', icon: 'contrast', label: 'Auto' }
     ];
     var themeId = Data.ls('sap-theme');
@@ -42,21 +44,24 @@
         var t = THEMES.find(function(x) { return x.id === themeId; });
         var dark = themeId === 'dark' || (themeId === 'auto' && mq && mq.matches);
         document.body.classList.toggle('sap-dark', !!dark);
+        document.body.classList.toggle('sap-pink', themeId === 'pink');
         document.querySelectorAll('.js-theme-icon').forEach(function(el) { el.innerHTML = Icons.svg(t.icon); });
         document.querySelectorAll('.js-theme-label').forEach(function(el) { el.textContent = t.label; });
-        document.querySelectorAll('.js-theme-toggle').forEach(function(el) { el.title = 'Tema ' + t.label.toLowerCase() + ' (toca para cambiar)'; });
+        document.querySelectorAll('.js-theme-toggle').forEach(function(el) { el.title = 'Tema: ' + t.label; });
         if (window.AndroidBridge && window.AndroidBridge.setDarkBars) window.AndroidBridge.setDarkBars(!!dark);
         updateThemeColor();
     }
     applyTheme();
     if (mq && mq.addEventListener) mq.addEventListener('change', function() { if (themeId === 'auto') applyTheme(); });
     document.querySelectorAll('.js-theme-toggle').forEach(function(b) {
-        b.addEventListener('click', function() {
-            var i = THEMES.findIndex(function(t) { return t.id === themeId; });
-            themeId = THEMES[(i + 1) % THEMES.length].id;
+        b.addEventListener('click', async function(e) {
+            var v = await UI.menu(e.currentTarget, THEMES.map(function(t) {
+                return { label: t.id === 'auto' ? 'Automático (según el sistema)' : t.label, icon: t.id === themeId ? 'check' : t.icon, value: t.id, primary: t.id === themeId };
+            }), 'Tema');
+            if (!v) return;
+            themeId = v;
             Data.ls('sap-theme', themeId);
             applyTheme();
-            UI.toast('Tema ' + THEMES.find(function(t) { return t.id === themeId; }).label.toLowerCase(), 'info');
         });
     });
 

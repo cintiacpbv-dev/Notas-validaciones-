@@ -23,12 +23,14 @@ El APK se compila automáticamente con GitHub Actions (`.github/workflows/androi
 
 **Validaciones (revisión de PDF)**
 - Panel de proyectos con avance (resueltas/pendientes), búsqueda, filtros y orden. En PC se puede arrastrar un PDF para crear un proyecto.
-- Editor con barra de herramientas: **Mover, Nota, Tachar, Foto, Video, Audio y Tiempo**. Eliges la herramienta y tocas el punto del documento.
+- Editor con barra de herramientas: **Mover, Nota, Tachar, Foto, Video, Audio y Tiempo**. Puedes elegir la herramienta y tocar el punto del documento, **o arrastrar el botón** hasta el lugar exacto.
+- Tocar cualquier marcador abre su detalle en el panel; fotos y videos se ven en **pantalla completa** (con zoom en fotos).
+- La numeración de observaciones se mantiene continua (#1, #2, #3…) aunque borres alguna.
 - **Tachar y reemplazar:** selecciona texto del PDF y pulsa el botón flotante.
 - Panel de **observaciones** numeradas (#1, #2…) agrupadas por página, con estado **Pendiente / Resuelta**, filtros por estado y tipo, y botón "Siguiente pendiente".
-- Zoom con pellizco, botones, Ctrl + rueda, doble toque y ajustar al ancho.
+- Zoom con pellizco que sigue tus dedos (acercar y desplazarte al mismo tiempo, sin esperar), botones, Ctrl + rueda, doble toque y ajustar al ancho.
 - Atajos en PC: `V` mover, `N` nota, `T` tachar, `F` foto, `G` video, `A` audio, `C` tiempo, `←/→` páginas, `Supr` borrar, `Esc` cerrar.
-- Iconos propios y tipografía IBM Plex; tema claro, oscuro o automático.
+- Iconos propios y tipografía IBM Plex; temas **claro, oscuro, rosa** o automático.
 
 **Compartir**
 - Resumen de observaciones por **WhatsApp** (con número opcional) o cualquier otra app.
