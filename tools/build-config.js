@@ -13,8 +13,6 @@ if (fs.existsSync(local)) {
   });
 }
 const url = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || env.VITE_SUPABASE_URL || '';
-const cur = fs.readFileSync(path.join(root, 'web/js/config.js'), 'utf8').match(/espacio:\s*'([^']*)'/);
-const espacio = env.SUPABASE_ESPACIO || env.MISNOTAS_ESPACIO || (cur ? cur[1] : '');
 const key = env.SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || '';
 if (!url || !key) {
   console.log('build-config: sin SUPABASE_URL / SUPABASE_ANON_KEY; se usa web/js/config.js tal cual.');
@@ -23,7 +21,6 @@ if (!url || !key) {
 const out = '/* Generado por tools/build-config.js — no editar a mano en Vercel. */\n' +
   'window.MISNOTAS_CONFIG = {\n' +
   '    supabaseUrl: ' + JSON.stringify(url.replace(/\/+$/, '')) + ',\n' +
-  '    espacio: ' + JSON.stringify(espacio) + ',\n' +
   '    supabaseAnonKey: ' + JSON.stringify(key) + '\n};\n';
 fs.writeFileSync(path.join(root, 'web/js/config.js'), out);
 console.log('build-config: web/js/config.js generado para ' + url);

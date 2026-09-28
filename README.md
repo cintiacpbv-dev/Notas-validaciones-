@@ -19,9 +19,7 @@ El APK se compila automáticamente con GitHub Actions (`.github/workflows/androi
 3. En **Settings → Environment Variables** agrega (para Production y Preview):
    - `SUPABASE_URL` = la Project URL de Supabase
    - `SUPABASE_ANON_KEY` = la anon public key
-   - `SUPABASE_ESPACIO` = código de espacio (opcional; si no se define se usa el de `web/js/config.js`)
 4. **Deploy.** Cada push a la rama vuelve a publicar la página.
-5. En Supabase → **Authentication → URL Configuration**, pon tu dominio de Vercel en **Site URL** (y en *Redirect URLs*) para que los correos de confirmación regresen a tu página.
 
 Para probar en tu PC con las mismas variables, crea `.env.local` (no se sube a GitHub) con esos dos valores y ejecuta `node tools/build-config.js`; luego sirve la carpeta `web/`, por ejemplo con `npx serve web`.
 
@@ -62,24 +60,22 @@ Para probar en tu PC con las mismas variables, crea `.env.local` (no se sube a G
 ## ☁️ Guardado local + Supabase
 
 - Todo se guarda **siempre en el dispositivo** y funciona sin internet.
-- **Sin iniciar sesión:** la app viene conectada a Supabase con un **código de espacio** (en `web/js/config.js`). Proyectos y notas de la agenda se guardan en la nube automáticamente, y todos los dispositivos con el mismo código comparten los datos. El código se puede cambiar en **Nube y dispositivo**; usa uno propio y difícil de adivinar para que tus datos no se mezclen con los de otras personas.
-- Opcionalmente se puede usar una **cuenta privada** (correo y contraseña) desde la misma pantalla.
+- **Uso personal, sin iniciar sesión:** la app viene conectada a tu Supabase (`web/js/config.js`) y guarda en la nube automáticamente. Todos tus dispositivos ven los mismos datos.
 - En Supabase se sincronizan entre tus dispositivos:
   - los proyectos (observaciones, estados, textos) y la agenda;
-  - los **documentos PDF** de cada proyecto (en un espacio privado de Supabase Storage; solo tu cuenta puede verlos). En otro dispositivo el PDF se descarga al abrir el proyecto, o en segundo plano si hay wifi, y queda guardado para usarlo sin internet. Si reemplazas el PDF, los demás equipos reciben la nueva versión.
+  - los **documentos PDF** de cada proyecto (en el bucket privado `documentos` de Supabase Storage). En otro dispositivo el PDF se descarga al abrir el proyecto, o en segundo plano si hay wifi, y queda guardado para usarlo sin internet. Si reemplazas el PDF, los demás equipos reciben la nueva versión.
 - Las **fotos, videos y audios NO se suben** por su peso: se quedan en el dispositivo donde se capturaron (en los otros equipos aparece "Guardado en otro dispositivo"). Para pasarlos usa **Compartir** (WhatsApp, redes, etc.) o **Exportar proyecto (.json)** con multimedia.
 - Límite por PDF: 50 MB (plan gratuito de Supabase). Si un PDF es más grande, se queda solo en el dispositivo y la app te avisa.
 
 ### Conectar Supabase (una sola vez)
 
 1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
-2. Ve a **SQL Editor → New query**, pega el contenido de [`supabase/schema.sql`](supabase/schema.sql) y pulsa **Run**. Crea las tablas, el espacio privado `documentos` para los PDF y las reglas de seguridad (cada usuario solo ve sus datos). Si ya lo habías ejecutado antes, vuelve a ejecutarlo para agregar el espacio de PDF (no borra nada).
+2. Ve a **SQL Editor → New query**, pega el contenido de [`supabase/schema.sql`](supabase/schema.sql) y pulsa **Run**. Crea las tablas `mn_proyectos` y `mn_agenda` y el bucket `documentos` para los PDF. Se puede volver a ejecutar sin borrar nada (y copia lo que hubiera de versiones anteriores).
 3. En **Project Settings → API** copia la **Project URL** y la **anon public key**.
 4. La app ya viene conectada a este proyecto (valores en `web/js/config.js`), así que no hay que pegar la URL ni la clave. Si quisieras usar otro proyecto: **Validaciones → botón de nube → Cambiar**.
-5. Listo: sin iniciar sesión, los datos se guardan con el código de espacio. En tus otros dispositivos usa el mismo código (ya viene igual en el APK y en Vercel).
-6. Si prefieres datos privados por usuario, en **Nube y dispositivo → Usar una cuenta privada** crea tu cuenta con correo y contraseña.
+5. Listo: no hay que iniciar sesión. El APK, la web y Vercel ya vienen conectados al mismo proyecto.
 
-> Opcional: si escribes la URL y la clave en [`web/js/config.js`](web/js/config.js), todos los dispositivos quedarán conectados automáticamente y solo tendrás que iniciar sesión. La *anon key* es pública por diseño; la seguridad la dan las reglas del `schema.sql`.
+> Como no hay inicio de sesión, quien tenga la *anon key* (está dentro del APK y en `web/js/config.js`) podría leer y escribir estos datos. Es adecuado para uso personal; no publiques el APK ni el link para otras personas.
 
 ## 🗂️ Estructura
 
