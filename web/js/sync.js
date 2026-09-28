@@ -1,6 +1,10 @@
-/* Sincronización con Supabase (opcional).
-   Estrategia "local primero": todo se guarda en el dispositivo y, si hay sesión
-   y conexión, se envían los cambios y se reciben los de otros dispositivos.
+/* Sincronización con Supabase.
+   Estrategia "local primero": todo se guarda en el dispositivo y, con conexión,
+   se envían los cambios y se reciben los de otros dispositivos.
+   Dos modos:
+    - Espacio (predeterminado, sin inicio de sesión): los datos se guardan bajo un
+      código de espacio; todos los dispositivos con el mismo código comparten datos.
+    - Cuenta (opcional): con correo y contraseña, datos privados de ese usuario.
    Conflictos: gana la versión modificada más recientemente.
    Se sincroniza el JSON de proyectos y agenda, y los PDF (Supabase Storage,
    carpeta privada por usuario). Fotos, videos y audios nunca salen del dispositivo. */
@@ -23,19 +27,39 @@ var Sync = (function() {
     function config() {
         var saved = readJSON(CFG_KEY) || {}, def = window.MISNOTAS_CONFIG || {};
         // Si el usuario pulsó "Cambiar", no se vuelve a aplicar la conexión predeterminada
-        if (saved.cleared) return { url: '', key: '' };
-        return { url: String(saved.url || def.supabaseUrl || '').trim().replace(/\/+$/, ''), key: String(saved.key || def.supabaseAnonKey || '').trim() };
+        if (saved.cleared) return { url: '', key: '', space: '' };
+        return {
+            url: String(saved.url || def.supabaseUrl || '').trim().replace(/\/+$/, ''),
+            key: String(saved.key || def.supabaseAnonKey || '').trim(),
+            space: String(saved.space != null ? saved.space : (def.espacio || '')).trim()
+        };
     }
     function configured() { var c = config(); return !!(c.url && c.key); }
     function setConfig(url, key) {
         var prev = config();
-        Data.ls(CFG_KEY, JSON.stringify({ url: url.trim().replace(/\/+$/, ''), key: key.trim() }));
+        Data.ls(CFG_KEY, JSON.stringify({ url: url.trim().replace(/\/+$/, ''), key: key.trim(), space: prev.space }));
         if (prev.url && prev.url !== config().url) signOut(true);
         refreshStatus();
     }
     function clearConfig() { signOut(true); Data.ls(CFG_KEY, JSON.stringify({ cleared: true })); refreshStatus(); }
     function session() { return readJSON(SES_KEY); }
     function user() { var s = session(); return s ? s.user : null; }
+    // Modo activo: 'account' (sesión iniciada), 'space' (sin sesión, con código) o null
+    function mode() { if (!configured()) return null; if (session()) return 'account'; return config().space ? 'space' : null; }
+    function space() { return config().space; }
+    // Prefijo de carpeta en Storage y dueño de los registros
+    function owner() { var m = mode(); return m === 'account' ? user().id : m === 'space' ? 'e_' + safeSpace(space()) : null; }
+    function safeSpace(v) { return String(v || '').replace(/[^A-Za-z0-9_-]/g, '_'); }
+    function setSpace(code) {
+        var saved = readJSON(CFG_KEY) || {}, c = config();
+        code = String(code || '').trim();
+        if (code === c.space) return;
+        saved.url = saved.url || c.url; saved.key = saved.key || c.key; saved.space = code; delete saved.cleared;
+        Data.ls(CFG_KEY, JSON.stringify(saved));
+        resetMarks();
+        refreshStatus();
+        schedule(0);
+    }
 
     function setState(status, message) {
         state.status = status; state.message = message || '';
@@ -44,7 +68,7 @@ var Sync = (function() {
     function onChange(fn) { listeners.push(fn); fn(state); }
     function refreshStatus() {
         if (!configured()) setState('local');
-        else if (!session()) setState('signed-out');
+        else if (!mode()) setState('signed-out');
         else if (state.status === 'local' || state.status === 'signed-out') setState(navigator.onLine ? 'idle' : 'offline');
     }
 
@@ -105,10 +129,12 @@ var Sync = (function() {
     }
     // Al cambiar de cuenta todo lo local se vuelve a enviar y se descarga todo de nuevo.
     function resetMarks() {
-        Data.ls(CUR_KEY, null);
+        Data.ls(curKey(), null);
         adapters.forEach(function(a) { if (a.resetMarks) a.resetMarks(); });
     }
+    function curKey() { return CUR_KEY + ':' + (mode() || '') + ':' + (owner() || ''); }
     async function token() {
+        if (mode() === 'space') return config().key;
         var s = session();
         if (!s) throw authError();
         if (s.expires_at - 60000 < Date.now()) await refreshToken();
@@ -119,10 +145,11 @@ var Sync = (function() {
     async function rest(method, query, body, prefer, retried) {
         var c = config(), t = await token(), res;
         var headers = { apikey: c.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' };
+        if (mode() === 'space') headers['x-espacio'] = space();
         if (prefer) headers.Prefer = prefer;
         try { res = await fetch(c.url + '/rest/v1/' + query, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined }); }
         catch (e) { var ne = new Error('Sin conexión'); ne.offline = true; throw ne; }
-        if (res.status === 401 && !retried) { await refreshToken(); return rest(method, query, body, prefer, true); }
+        if (res.status === 401 && !retried && mode() === 'account') { await refreshToken(); return rest(method, query, body, prefer, true); }
         if (!res.ok) {
             var d = await res.json().catch(function() { return {}; });
             var err = new Error(d.message || ('Error ' + res.status));
@@ -138,9 +165,10 @@ var Sync = (function() {
         opts = opts || {};
         var c = config(), t = await token(), res;
         var headers = Object.assign({ apikey: c.key, Authorization: 'Bearer ' + t }, opts.headers || {});
+        if (mode() === 'space') headers['x-espacio'] = space();
         try { res = await fetch(c.url + '/storage/v1/' + path, { method: method, headers: headers, body: opts.body }); }
         catch (e) { var ne = new Error('Sin conexión'); ne.offline = true; throw ne; }
-        if (res.status === 401 && !retried) { await refreshToken(); return storageFetch(method, path, opts, true); }
+        if (res.status === 401 && !retried && mode() === 'account') { await refreshToken(); return storageFetch(method, path, opts, true); }
         if (!res.ok) {
             var d = await res.json().catch(function() { return {}; });
             var msg = d.message || d.error || ('Error ' + res.status);
@@ -186,11 +214,13 @@ var Sync = (function() {
     function register(adapter) { adapters.push(adapter); }
 
     async function syncTable(a) {
-        var cursors = readJSON(CUR_KEY) || {};
+        var cursors = readJSON(curKey()) || {}, spaceMode = mode() === 'space';
+        var table = spaceMode ? 'espacio_' + a.table : a.table;
         var since = cursors[a.table];
         // 1) Descargar cambios de otros dispositivos
         for (;;) {
-            var q = a.table + '?select=id,data,deleted,client_updated_at,updated_at&order=updated_at.asc&limit=' + PAGE;
+            var q = table + '?select=id,data,deleted,client_updated_at,updated_at&order=updated_at.asc&limit=' + PAGE;
+            if (spaceMode) q += '&espacio=eq.' + encodeURIComponent(space());
             if (since) q += '&updated_at=gt.' + encodeURIComponent(new Date(new Date(since).getTime() - 3000).toISOString());
             var rows = await rest('GET', q);
             if (rows.length) {
@@ -199,23 +229,23 @@ var Sync = (function() {
                 if (last === since) break;
                 since = last;
                 cursors[a.table] = since;
-                Data.ls(CUR_KEY, JSON.stringify(cursors));
+                Data.ls(curKey(), JSON.stringify(cursors));
             }
             if (rows.length < PAGE) break;
         }
         // 2) Subir archivos (PDF) que el adaptador necesite antes de enviar el JSON
         if (a.beforePush) await a.beforePush();
         // 3) Enviar cambios locales y borrados
-        var uidv = user().id;
+        var own = spaceMode ? { espacio: space() } : { user_id: user().id };
         var dirty = a.list().filter(a.isDirty);
         var tombs = await Data.tombstones(a.table);
         var payload = dirty.map(function(it) {
-            return { user_id: uidv, id: it.id, data: a.toData(it), deleted: false, client_updated_at: a.stamp(it) };
+            return Object.assign({ id: it.id, data: a.toData(it), deleted: false, client_updated_at: a.stamp(it) }, own);
         }).concat(tombs.map(function(t) {
-            return { user_id: uidv, id: t.id, data: {}, deleted: true, client_updated_at: t.at };
+            return Object.assign({ id: t.id, data: {}, deleted: true, client_updated_at: t.at }, own);
         }));
         for (var i = 0; i < payload.length; i += CHUNK) {
-            await rest('POST', a.table + '?on_conflict=user_id,id', payload.slice(i, i + CHUNK), 'resolution=merge-duplicates,return=minimal');
+            await rest('POST', table + (spaceMode ? '?on_conflict=espacio,id' : '?on_conflict=user_id,id'), payload.slice(i, i + CHUNK), 'resolution=merge-duplicates,return=minimal');
         }
         if (dirty.length) await a.markClean(dirty.map(function(it) { return { id: it.id, stamp: a.stamp(it) }; }));
         if (tombs.length) await Data.clearTombstones(a.table, tombs.map(function(t) { return t.id; }));
@@ -224,7 +254,7 @@ var Sync = (function() {
     async function syncNow() {
         clearTimeout(timer);
         if (!configured()) return setState('local');
-        if (!session()) return setState('signed-out');
+        if (!mode()) return setState('signed-out');
         if (!navigator.onLine) return setState('offline');
         if (running) { again = true; return; }
         running = true;
@@ -250,13 +280,13 @@ var Sync = (function() {
         }
     }
     function schedule(delay) {
-        if (!configured() || !session()) return;
+        if (!mode()) return;
         clearTimeout(timer);
         timer = setTimeout(syncNow, delay == null ? 1500 : delay);
     }
 
     window.addEventListener('online', function() { schedule(0); });
-    window.addEventListener('offline', function() { if (session()) setState('offline'); });
+    window.addEventListener('offline', function() { if (mode()) setState('offline'); });
     document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'visible') schedule(300); });
     setInterval(function() { if (document.visibilityState === 'visible') schedule(0); }, 90000);
 
@@ -265,6 +295,7 @@ var Sync = (function() {
         local: { icon: 'phone', text: 'Solo en este dispositivo' },
         'signed-out': { icon: 'cloudOff', text: 'Nube sin sesión' },
         idle: { icon: 'cloud', text: 'Nube conectada' },
+        'no-space': { icon: 'cloudOff', text: 'Falta el código de espacio' },
         syncing: { icon: 'sync', text: 'Sincronizando…' },
         synced: { icon: 'cloudCheck', text: 'Sincronizado' },
         offline: { icon: 'cloudOff', text: 'Sin conexión' },
@@ -292,7 +323,7 @@ var Sync = (function() {
             function render(msg, isError) {
                 var c = config(), u = user(), dev = Data.device(), typed = {};
                 hadUser = !!u;
-                ['url', 'key', 'email'].forEach(function(k) { var el = dlg.querySelector('[data-' + k + ']'); if (el) typed[k] = el.value; });
+                ['url', 'key', 'email', 'space'].forEach(function(k) { var el = dlg.querySelector('[data-' + k + ']'); if (el) typed[k] = el.value; });
                 var h = '<div class="ui-head"><h3>Nube y dispositivo</h3><button class="ui-x" data-close aria-label="Cerrar">' + Icons.svg('close') + '</button></div>';
                 h += statusHtml();
                 if (!configured()) {
@@ -302,9 +333,13 @@ var Sync = (function() {
                         '<div class="ui-actions"><button class="btn" data-save-cfg>Conectar</button></div>';
                 } else if (!u) {
                     h += '<div class="ui-kv"><span>Proyecto</span><b>' + esc(c.url.replace(/^https?:\/\//, '')) + '</b><button class="ui-link" data-change-cfg>Cambiar</button></div>' +
+                        '<label class="ui-field"><span>Código de espacio (sin inicio de sesión)</span><input data-space value="' + esc(c.space) + '" autocomplete="off" spellcheck="false" placeholder="Ej. equipo-calidad"></label>' +
+                        '<p class="ui-help ui-help-sm">Tus proyectos y tu agenda se guardan en Supabase con este código. Todos los dispositivos con el mismo código ven los mismos datos. Para separar tus datos de los de otras personas usa un código propio y difícil de adivinar.</p>' +
+                        '<div class="ui-actions ui-actions-split"><button class="btn btn-ghost" data-save-space>Guardar código</button><button class="btn" data-sync>' + Icons.svg('sync') + 'Sincronizar ahora</button></div>' +
+                        '<details class="ui-more"><summary>Usar una cuenta privada (opcional)</summary>' +
                         '<label class="ui-field"><span>Correo</span><input data-email type="email" autocomplete="email" inputmode="email" placeholder="tu@correo.com"></label>' +
                         '<label class="ui-field"><span>Contraseña</span><input data-pass type="password" autocomplete="current-password" placeholder="Mínimo 6 caracteres"></label>' +
-                        '<div class="ui-actions"><button class="btn btn-ghost" data-signup>Crear cuenta</button><button class="btn" data-signin>Iniciar sesión</button></div>';
+                        '<div class="ui-actions"><button class="btn btn-ghost" data-signup>Crear cuenta</button><button class="btn" data-signin>Iniciar sesión</button></div></details>';
                 } else {
                     h += '<div class="ui-kv"><span>Proyecto</span><b>' + esc(c.url.replace(/^https?:\/\//, '')) + '</b></div>' +
                         '<div class="ui-actions ui-actions-split"><button class="btn btn-ghost" data-signout>' + Icons.svg('logout') + 'Cerrar sesión</button><button class="btn" data-sync>' + Icons.svg('sync') + 'Sincronizar ahora</button></div>';
@@ -319,7 +354,7 @@ var Sync = (function() {
             function statusHtml() {
                 var u = user(), l = label();
                 return '<div class="ui-status ui-status-' + state.status + '">' + Icons.svg(l.icon) + '<div><strong>' + l.text + '</strong>' +
-                    (u ? '<span>' + esc(u.email) + ' · última sincronización ' + relTime(state.lastSync) + '</span>' : '') +
+                    (u ? '<span>' + esc(u.email) + ' · última sincronización ' + relTime(state.lastSync) + '</span>' : mode() === 'space' ? '<span>Espacio «' + esc(space()) + '» · última sincronización ' + relTime(state.lastSync) + '</span>' : '') +
                     (state.message ? '<span class="ui-status-msg">' + esc(state.message) + '</span>' : '') + '</div></div>';
             }
             function busy(btn, on) { if (btn) { btn.disabled = on; btn.classList.toggle('is-busy', on); } }
@@ -351,6 +386,12 @@ var Sync = (function() {
                 });
                 var so = q('[data-signout]');
                 if (so) so.addEventListener('click', function() { signOut(); render('Sesión cerrada. Tus datos siguen guardados en este dispositivo.'); });
+                var ss = q('[data-save-space]');
+                if (ss) ss.addEventListener('click', function() {
+                    var v = q('[data-space]').value.trim();
+                    if (v.length < 4) return render('El código debe tener al menos 4 caracteres.', true);
+                    setSpace(v); render('Código guardado. Sincronizando con el espacio «' + v + '»…');
+                });
                 var sy = q('[data-sync]');
                 if (sy) sy.addEventListener('click', function() { syncNow(); });
             }
@@ -372,6 +413,7 @@ var Sync = (function() {
     refreshStatus();
 
     return {
+        mode: mode, owner: owner, space: space, setSpace: setSpace,
         register: register, syncNow: syncNow, schedule: schedule, onChange: onChange, state: function() { return state; },
         storage: storage, warn: warn, progress: progress,
         label: label, relTime: relTime, configured: configured, user: user, openSettings: openSettings,

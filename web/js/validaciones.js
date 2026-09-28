@@ -84,7 +84,7 @@ var Validaciones = (function() {
     }
     // Versión del PDF: su huella SHA-256 (o un id si el navegador no puede calcularla)
     function pdfVer(p) { return p.pdf ? (p.pdf.hash || p.pdf.ver || 'v0') : null; }
-    function ownPath(path) { var u = Sync.user(); return !!(u && path && path.indexOf(u.id + '/') === 0); }
+    function ownPath(path) { var o = Sync.owner(); return !!(o && path && path.indexOf(o + '/') === 0); }
     function pdfInCloud(p) { return !!(p.pdf && p.pdf.remotePath && p.pdf.remoteHash === pdfVer(p)); }
     function pendingDeletes() { try { return JSON.parse(Data.ls(DELETES_KEY) || '[]'); } catch (e) { return []; } }
     function queueDelete(path) { var l = pendingDeletes(); if (l.indexOf(path) === -1) l.push(path); Data.ls(DELETES_KEY, JSON.stringify(l)); }
@@ -107,7 +107,7 @@ var Validaciones = (function() {
         return downloads[p.id];
     }
     async function prefetchPdfs() {
-        if (prefetching || !Sync.user() || !canPrefetch()) return;
+        if (prefetching || !Sync.owner() || !canPrefetch()) return;
         prefetching = true;
         try {
             var todo = projects.filter(function(p) { return p.pdf && !localPdfs[p.id] && pdfInCloud(p) && ownPath(p.pdf.remotePath) && (p.pdf.size || 0) < 40e6; });
@@ -168,9 +168,9 @@ var Validaciones = (function() {
         },
         resetMarks: function() { projects.forEach(function(p) { p._syncedAt = null; }); return persist(true); },
         beforePush: async function() {
-            var u = Sync.user();
-            if (!u) return;
-            var dels = pendingDeletes().filter(function(x) { return x.indexOf(u.id + '/') === 0; });
+            var o = Sync.owner();
+            if (!o) return;
+            var dels = pendingDeletes().filter(function(x) { return x.indexOf(o + '/') === 0; });
             if (dels.length) {
                 try { await Sync.storage.remove(dels); clearDeletes(dels); }
                 catch (e) { if (e.offline || e.auth) throw e; }
@@ -183,7 +183,7 @@ var Validaciones = (function() {
                 if (p.pdf.skipUpload === ver) continue;
                 var blob = await Data.getPdf(p.id);
                 if (!blob) continue;
-                var path = u.id + '/' + p.id + '/' + String(ver).slice(0, 40) + '.pdf';
+                var path = o + '/' + p.id + '/' + String(ver).slice(0, 40) + '.pdf';
                 Sync.progress('Subiendo «' + p.pdf.name + '»');
                 try { await Sync.storage.upload(path, blob, 'application/pdf'); }
                 catch (e) {
@@ -206,7 +206,7 @@ var Validaciones = (function() {
                 touch(p, { quiet: true });
                 if (p === current) renderDocline();
             }
-            var more = pendingDeletes().filter(function(x) { return x.indexOf(u.id + '/') === 0; });
+            var more = pendingDeletes().filter(function(x) { return x.indexOf(o + '/') === 0; });
             if (more.length) { try { await Sync.storage.remove(more); clearDeletes(more); } catch (e) { if (e.offline) throw e; } }
         },
         afterSync: function() {
@@ -326,14 +326,14 @@ var Validaciones = (function() {
         var where = '';
         if (p.pdf) {
             if (!hasPdf) where = pdfInCloud(p) ? 'en la nube' : 'en otro dispositivo';
-            else if (Sync.user()) where = pdfInCloud(p) ? 'respaldado' : 'por subir';
+            else if (Sync.owner()) where = pdfInCloud(p) ? 'respaldado' : 'por subir';
         }
         var docMeta = p.pdf ? [p.pdf.pages ? p.pdf.pages + ' págs.' : '', where].filter(Boolean).join(' · ') : 'Agrega un PDF';
         var prog = st.total
             ? '<div class="vx-progress"><div class="vx-bar"><i style="width:' + pct + '%"></i></div><div class="vx-progress-text"><span><b>' + st.done + '/' + st.total + '</b> resueltas</span>' +
               (st.open ? '<span class="vx-chip vx-chip-warn">' + st.open + (st.open === 1 ? ' pendiente' : ' pendientes') + '</span>' : '<span class="vx-chip vx-chip-ok">' + ic('check') + 'Completado</span>') + '</div></div>'
             : '<div class="vx-progress-text"><span class="vx-muted">Sin observaciones todavía</span></div>';
-        var pendingSync = p._dirty && Sync.user() ? '<span class="vx-chip" title="Se enviará a la nube cuando haya conexión">' + ic('sync') + 'Por sincronizar</span>' : '';
+        var pendingSync = p._dirty && Sync.owner() ? '<span class="vx-chip" title="Se enviará a la nube cuando haya conexión">' + ic('sync') + 'Por sincronizar</span>' : '';
         return '<div class="vx-row" role="button" tabindex="0" data-id="' + p.id + '">' +
             '<div class="vx-row-main">' + sheet + '<div class="vx-row-text"><span class="vx-row-name">' + esc(p.name || 'Sin nombre') + '</span><span class="vx-row-sub">' + docName + (docMeta ? ' · ' + docMeta : '') + '</span></div></div>' +
             '<div class="vx-row-doc"><span>' + docName + '</span><small>' + (p.pdf && where ? ic(where === 'en otro dispositivo' ? 'phone' : where === 'por subir' ? 'upload' : 'cloud') : '') + docMeta + '</small></div>' +
@@ -391,7 +391,7 @@ var Validaciones = (function() {
 
     async function deleteProject(p) {
         var st = stats(p);
-        var msg = 'Se eliminará «' + p.name + '» con ' + st.total + (st.total === 1 ? ' observación' : ' observaciones') + ' y la multimedia guardada en este dispositivo.' + (Sync.user() ? ' También se quitará de la nube y de tus otros dispositivos.' : '');
+        var msg = 'Se eliminará «' + p.name + '» con ' + st.total + (st.total === 1 ? ' observación' : ' observaciones') + ' y la multimedia guardada en este dispositivo.' + (Sync.owner() ? ' También se quitará de la nube y de tus otros dispositivos.' : '');
         if (!(await UI.confirm(msg, { title: 'Eliminar proyecto', okText: 'Eliminar', danger: true }))) return;
         await removeLocal(p, true);
         await persist(true);
@@ -709,7 +709,7 @@ var Validaciones = (function() {
         var p = current, t;
         if (!p.pdf) t = 'Sin documento';
         else {
-            var where = !localPdfs[p.id] ? (pdfInCloud(p) ? ' · en la nube' : ' · en otro dispositivo') : (Sync.user() ? (pdfInCloud(p) ? ' · respaldado en la nube' : ' · pendiente de subir') : '');
+            var where = !localPdfs[p.id] ? (pdfInCloud(p) ? ' · en la nube' : ' · en otro dispositivo') : (Sync.owner() ? (pdfInCloud(p) ? ' · respaldado en la nube' : ' · pendiente de subir') : '');
             t = p.pdf.name + (p.pdf.pages ? ' · ' + p.pdf.pages + ' págs.' : '') + where;
         }
         $('vx-docline').textContent = t;
@@ -728,7 +728,7 @@ var Validaciones = (function() {
         var blob = await Data.getPdf(p.id);
         if (token !== loadToken) return;
         if (!blob && pdfInCloud(p)) {
-            if (!Sync.user()) { pdfDoc = null; showNoDoc('signed-out'); return; }
+            if (!Sync.owner()) { pdfDoc = null; showNoDoc('signed-out'); return; }
             if (!ownPath(p.pdf.remotePath)) { pdfDoc = null; showNoDoc(); return; }
             showNoDoc('downloading');
             try {
@@ -796,10 +796,10 @@ var Validaciones = (function() {
             h = '<div class="vx-nodoc-ic">' + ic('alert') + '</div><h3>No se pudo abrir el PDF</h3><p>El archivo parece dañado o protegido. Prueba adjuntarlo de nuevo.</p><button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Adjuntar PDF</button>';
         } else if (p.pdf) {
             var from = p.pdf.device ? '«' + esc(p.pdf.device) + '»' : 'otro equipo';
-            h = '<div class="vx-nodoc-ic">' + ic('phone') + '</div><h3>El PDF aún no está en la nube</h3><p>«' + esc(p.pdf.name) + '» se cargó en ' + from + ' y todavía no se ha subido. Se subirá cuando ese equipo tenga internet y sesión iniciada; mientras tanto puedes adjuntar el mismo archivo aquí.</p>' +
+            h = '<div class="vx-nodoc-ic">' + ic('phone') + '</div><h3>El PDF aún no está en la nube</h3><p>«' + esc(p.pdf.name) + '» se cargó en ' + from + ' y todavía no se ha subido. Se subirá cuando ese equipo tenga internet; mientras tanto puedes adjuntar el mismo archivo aquí.</p>' +
                 '<button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Adjuntar PDF</button>' + (p.pdf.skipUpload ? '<small>Este PDF es demasiado grande para el plan de Supabase.</small>' : '');
         } else {
-            h = '<div class="vx-nodoc-ic">' + ic('filePlus') + '</div><h3>Agrega el documento a revisar</h3><p>Selecciona el PDF de este proyecto.' + (Sync.user() ? ' Se guardará en este dispositivo y en tu nube.' : ' Se guarda en este dispositivo.') + '</p>' +
+            h = '<div class="vx-nodoc-ic">' + ic('filePlus') + '</div><h3>Agrega el documento a revisar</h3><p>Selecciona el PDF de este proyecto.' + (Sync.owner() ? ' Se guardará en este dispositivo y en tu nube.' : ' Se guarda en este dispositivo.') + '</p>' +
                 '<button class="vx-btn vx-btn-primary" data-pick>' + ic('upload') + 'Seleccionar PDF</button>' + (isTouch() ? '' : '<small>También puedes arrastrar el archivo aquí.</small>');
         }
         n.innerHTML = h;

@@ -416,3 +416,9 @@ body.sap-dark .toast .ic { color: var(--ok); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(229, 72, 77, .55); } 70% { box-shadow: 0 0 0 12px rgba(229, 72, 77, 0); } 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+.ui-more { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.ui-more summary { cursor: pointer; font-size: 13.5px; font-weight: 500; color: var(--accent); list-style: none; }
+.ui-more summary::-webkit-details-marker { display: none; }
+.ui-more summary::before { content: '+ '; }
+.ui-more[open] summary::before { content: '– '; }
