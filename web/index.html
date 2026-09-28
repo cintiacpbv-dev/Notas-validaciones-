@@ -15,6 +15,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="stylesheet" href="css/app.css">
     <link rel="stylesheet" href="css/validaciones.css">
+    <link rel="stylesheet" href="css/seguimiento.css">
     <link rel="stylesheet" href="css/agenda.css">
     <script src="vendor/pdf.min.js"></script>
     <script src="vendor/localforage.min.js"></script>
@@ -30,6 +31,9 @@
             </div>
             <button class="nav-item active" data-section="validaciones">
                 <i data-icon="clipboard"></i><span class="nav-label">Validaciones</span>
+            </button>
+            <button class="nav-item" data-section="seguimiento">
+                <i data-icon="tracker"></i><span class="nav-label">Seguimiento</span>
             </button>
             <button class="nav-item" data-section="agenda">
                 <i data-icon="bow"></i><span class="nav-label">Mi Agenda</span>
@@ -131,6 +135,220 @@
                     <input type="file" id="vx-file-pdf" accept="application/pdf,.pdf" hidden>
                 </div>
                 <input type="file" id="vx-file-import" accept=".json,.zip,application/json,application/zip" hidden>
+            </section>
+
+            <!-- ============ SEGUIMIENTO (tablero de validaciones por producto) ============ -->
+            <section id="section-seguimiento" class="section hidden">
+                <header class="vx-head">
+                    <div class="vx-head-title">
+                        <h1>Seguimiento</h1>
+                        <p id="sincronizacion" class="vx-muted">Cargando…</p>
+                    </div>
+                    <div class="vx-head-actions" id="acciones" hidden>
+                        <button type="button" class="vx-btn vx-btn-quiet" id="btn-exportar" title="Descargar la vista actual como CSV (Excel)"><i data-icon="download"></i><span>Exportar CSV</span></button>
+                        <button type="button" class="vx-btn vx-btn-primary" id="btn-nueva"><i data-icon="plus"></i><span>Nueva validación</span></button>
+                    </div>
+                </header>
+                  <div id="aviso-demo" class="aviso" hidden>
+                    <strong>Modo demostración.</strong>
+                    Los datos son de ejemplo y se guardan solo en este navegador. Para usar los datos reales,
+                    configurá Supabase en <code>js/config.js</code> (ver README).
+                    <button type="button" class="boton-enlace" id="btn-restablecer">Restablecer ejemplo</button>
+                  </div>
+
+
+                  <div class="sg-scroll">
+                  <main id="app" hidden>
+                    <section class="kpis" id="kpis" aria-label="Resumen"></section>
+
+                    <section class="tarjeta etapas" aria-labelledby="titulo-etapas">
+                      <div class="seccion-cabecera">
+                        <h2 id="titulo-etapas">Validaciones por etapa</h2>
+                      </div>
+                      <div class="etapas-flujo" id="etapas-flujo"></div>
+                    </section>
+
+                    <section class="tarjeta" aria-label="Listado de validaciones">
+                      <div class="filtros" id="filtros">
+                        <input type="search" id="f-texto" placeholder="Buscar por producto, código o responsable" aria-label="Buscar">
+                        <select id="f-tipo" aria-label="Tipo de validación"></select>
+                        <select id="f-etapa" aria-label="Etapa"></select>
+                        <select id="f-estado" aria-label="Estado"></select>
+                        <select id="f-responsable" aria-label="Responsable"></select>
+                        <label class="casilla"><input type="checkbox" id="f-cerradas" checked> Incluir cerradas</label>
+                        <button type="button" class="boton-enlace" id="btn-limpiar" hidden>Limpiar filtros</button>
+                      </div>
+                      <p class="texto-suave resultado" id="resultado" aria-live="polite"></p>
+                      <div class="tabla-contenedor">
+                        <table class="tabla" id="tabla">
+                          <thead>
+                            <tr>
+                              <th><button type="button" data-orden="producto">Producto</button></th>
+                              <th><button type="button" data-orden="codigo_protocolo">Protocolo</button></th>
+                              <th><button type="button" data-orden="etapa">Etapa</button></th>
+                              <th>Lotes</th>
+                              <th><button type="button" data-orden="observaciones">Observaciones pendientes</button></th>
+                              <th><button type="button" data-orden="fecha_objetivo">Fechas</button></th>
+                              <th><button type="button" data-orden="responsable">Responsable</button></th>
+                              <th><button type="button" data-orden="estado">Estado</button></th>
+                            </tr>
+                          </thead>
+                          <tbody id="tabla-cuerpo"></tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </main>
+                  </div>
+
+                  <!-- Panel de detalle / edición -->
+                  <dialog id="panel" class="panel" aria-labelledby="panel-titulo">
+                    <div class="panel-cabecera">
+                      <div>
+                        <h2 id="panel-titulo"></h2>
+                        <p id="panel-subtitulo" class="texto-suave"></p>
+                      </div>
+                      <button type="button" class="boton boton-secundario boton-chico" id="btn-cerrar-panel">Cerrar</button>
+                    </div>
+                    <nav class="pestanas" id="pestanas" role="tablist">
+                      <button type="button" role="tab" data-pestana="datos" aria-selected="true">Datos</button>
+                      <button type="button" role="tab" data-pestana="observaciones" aria-selected="false">Observaciones <span id="pestana-obs-n" class="contador"></span></button>
+                      <button type="button" role="tab" data-pestana="historial" aria-selected="false">Historial</button>
+                    </nav>
+
+                    <div class="panel-cuerpo">
+                      <form id="form-validacion" data-pestana-contenido="datos" novalidate>
+                        <fieldset>
+                          <legend>Producto</legend>
+                          <div class="grilla">
+                            <label class="ancho-2">Producto *
+                              <input name="producto" list="lista-productos" required maxlength="120">
+                            </label>
+                            <label>Presentación
+                              <input name="presentacion" placeholder="Ej.: Comprimidos 500 mg" maxlength="120">
+                            </label>
+                            <label>Tipo de validación
+                              <input name="tipo_validacion" list="lista-tipos" required maxlength="60">
+                            </label>
+                            <label>Prioridad
+                              <select name="prioridad">
+                                <option>Alta</option><option>Media</option><option>Baja</option>
+                              </select>
+                            </label>
+                            <label>Responsable
+                              <input name="responsable" list="lista-responsables" maxlength="80">
+                            </label>
+                          </div>
+                        </fieldset>
+
+                        <fieldset>
+                          <legend>Protocolo e informe</legend>
+                          <div class="grilla">
+                            <label>Código de protocolo
+                              <input name="codigo_protocolo" placeholder="Ej.: PV-DOL-001" maxlength="60">
+                            </label>
+                            <label>Código de informe
+                              <input name="codigo_informe" maxlength="60">
+                            </label>
+                            <label class="ancho-2">Enlace a documentos
+                              <input name="enlace_documentos" type="url" placeholder="https://">
+                            </label>
+                          </div>
+                        </fieldset>
+
+                        <fieldset>
+                          <legend>Avance</legend>
+                          <div class="grilla">
+                            <label>Etapa
+                              <select name="etapa"></select>
+                            </label>
+                            <label>Estado
+                              <select name="estado">
+                                <option>En curso</option><option>En espera</option><option>Bloqueada</option><option>Cancelada</option>
+                              </select>
+                            </label>
+                            <label>Lotes requeridos
+                              <input name="lotes_requeridos" type="number" min="0" max="99" step="1">
+                            </label>
+                            <label>Lotes ejecutados
+                              <input name="lotes_ejecutados" type="number" min="0" max="99" step="1">
+                            </label>
+                            <label class="ancho-2">Números de lote
+                              <input name="lotes" placeholder="Ej.: L2401, L2402, L2403" maxlength="200">
+                            </label>
+                            <label class="ancho-2">Próxima acción
+                              <input name="proxima_accion" maxlength="200">
+                            </label>
+                          </div>
+                        </fieldset>
+
+                        <fieldset>
+                          <legend>Fechas</legend>
+                          <div class="grilla">
+                            <label>Inicio
+                              <input name="fecha_inicio" type="date">
+                            </label>
+                            <label>Aprobación del protocolo
+                              <input name="fecha_aprobacion_protocolo" type="date">
+                            </label>
+                            <label>Fecha objetivo de cierre
+                              <input name="fecha_objetivo" type="date">
+                            </label>
+                            <label>Cierre (informe aprobado)
+                              <input name="fecha_cierre" type="date">
+                            </label>
+                            <label>Próxima revalidación
+                              <input name="fecha_revalidacion" type="date">
+                            </label>
+                          </div>
+                        </fieldset>
+
+                        <fieldset>
+                          <legend>Notas</legend>
+                          <textarea name="notas" rows="3" aria-label="Notas"></textarea>
+                        </fieldset>
+
+                        <p class="texto-suave" id="ultima-modificacion"></p>
+                        <p class="error" id="form-error" role="alert" hidden></p>
+                        <div class="panel-pie">
+                          <button type="button" class="boton boton-peligro" id="btn-eliminar">Eliminar</button>
+                          <span class="separador"></span>
+                          <button type="button" class="boton boton-secundario" id="btn-cancelar">Cancelar</button>
+                          <button type="submit" class="boton boton-primario">Guardar</button>
+                        </div>
+                      </form>
+
+                      <section data-pestana-contenido="observaciones" hidden>
+                        <form id="form-observacion" class="obs-nueva">
+                          <label>Nueva observación
+                            <textarea name="descripcion" rows="2" required ></textarea>
+                          </label>
+                          <div class="grilla">
+                            <label>Responsable
+                              <input name="responsable" list="lista-responsables" maxlength="80">
+                            </label>
+                            <label>Fecha compromiso
+                              <input name="fecha_compromiso" type="date">
+                            </label>
+                          </div>
+                          <div class="acciones-derecha">
+                            <button type="submit" class="boton boton-primario">Agregar</button>
+                          </div>
+                        </form>
+                        <ul class="obs-lista" id="obs-lista"></ul>
+                      </section>
+
+                      <section data-pestana-contenido="historial" hidden>
+                        <ol class="historial" id="historial"></ol>
+                      </section>
+                    </div>
+                  </dialog>
+
+                  <datalist id="lista-productos"></datalist>
+                  <datalist id="lista-tipos"></datalist>
+                  <datalist id="lista-responsables"></datalist>
+
+                  <div id="aviso-flotante" class="aviso-flotante" role="status" aria-live="polite" hidden></div>
+
             </section>
 
             <!-- ============ AGENDA ============ -->

@@ -50,6 +50,11 @@ Para probar en tu PC con las mismas variables, crea `.env.local` (no se sube a G
 - **Exportar proyecto (.json)** para abrirlo en otro equipo, con PDF y multimedia opcionales. Se abre con **Importar**.
 - Respaldo completo (.zip) de todo: proyectos, PDF, multimedia y agenda.
 
+**Seguimiento (tablero de validaciones por producto)**
+- Integración del proyecto [Seguimiento-de-validaciones](https://github.com/cintiacpbv-dev/Seguimiento-de-validaciones) como sección propia, con el diseño y los temas de la app.
+- Indicadores (activas, fuera de plazo, observaciones pendientes, cerradas en el año, revalidaciones), validaciones por etapa, tabla con filtros y orden, panel de detalle con datos, observaciones e historial, y exportar CSV.
+- Usa su propia base de Supabase compartida por el equipo (sin inicio de sesión), configurada en `web/seguimiento/config.js`; los cambios de otras personas aparecen solos. Scripts SQL en `supabase/seguimiento/`.
+
 **Mi Agenda 🎀**
 - Notas tipo post‑it con colores, stickers, categorías, fijadas, listas de tareas, calendario y pendientes.
 
@@ -81,6 +86,7 @@ web/                 App web (se empaqueta tal cual dentro del APK)
   css/ app.css, validaciones.css, agenda.css
   js/  icons.js (iconos propios), ui.js, store.js (datos locales), sync.js (Supabase),
        share.js (compartir/exportar), validaciones.js, agenda.js, app.js, config.js
+  seguimiento/       Tablero de seguimiento (módulos: app, store, util, demo, config)
   vendor/            pdf.js, localforage y JSZip (sin depender de internet)
   icons/schnauzer.svg  Icono original del Schnauzer
 android/             Proyecto Android (WebView nativo)

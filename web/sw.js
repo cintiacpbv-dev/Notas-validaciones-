@@ -1,8 +1,9 @@
 /* Service worker para usar la app sin conexión desde el navegador (PC/tablet). */
-var CACHE = 'misnotas-v5';
+var CACHE = 'misnotas-v6';
 var FILES = [
     './', 'index.html', 'manifest.webmanifest',
-    'css/app.css', 'css/validaciones.css', 'css/agenda.css',
+    'css/app.css', 'css/validaciones.css', 'css/seguimiento.css', 'css/agenda.css',
+    'seguimiento/app.js', 'seguimiento/store.js', 'seguimiento/util.js', 'seguimiento/demo.js', 'seguimiento/config.js', 'vendor/supabase.min.js',
     'js/config.js', 'js/icons.js', 'js/ui.js', 'js/store.js', 'js/sync.js', 'js/share.js',
     'js/validaciones.js', 'js/agenda.js', 'js/app.js',
     'vendor/pdf.min.js', 'vendor/pdf.worker.min.js', 'vendor/localforage.min.js', 'vendor/jszip.min.js',
