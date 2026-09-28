@@ -22,6 +22,8 @@ var Sync = (function() {
     function readJSON(key) { try { return JSON.parse(Data.ls(key) || 'null'); } catch (e) { return null; } }
     function config() {
         var saved = readJSON(CFG_KEY) || {}, def = window.MISNOTAS_CONFIG || {};
+        // Si el usuario pulsó "Cambiar", no se vuelve a aplicar la conexión predeterminada
+        if (saved.cleared) return { url: '', key: '' };
         return { url: String(saved.url || def.supabaseUrl || '').trim().replace(/\/+$/, ''), key: String(saved.key || def.supabaseAnonKey || '').trim() };
     }
     function configured() { var c = config(); return !!(c.url && c.key); }
@@ -31,7 +33,7 @@ var Sync = (function() {
         if (prev.url && prev.url !== config().url) signOut(true);
         refreshStatus();
     }
-    function clearConfig() { signOut(true); Data.ls(CFG_KEY, null); refreshStatus(); }
+    function clearConfig() { signOut(true); Data.ls(CFG_KEY, JSON.stringify({ cleared: true })); refreshStatus(); }
     function session() { return readJSON(SES_KEY); }
     function user() { var s = session(); return s ? s.user : null; }
 

@@ -12,6 +12,18 @@ Funciona en **celular, tablet y PC**, y sin conexión a internet.
 
 El APK se compila automáticamente con GitHub Actions (`.github/workflows/android-apk.yml`) en cada cambio a `web/` o `android/`. También puedes lanzarlo a mano desde **Actions → Compilar APK → Run workflow**.
 
+## ▲ Desplegar en Vercel
+
+1. En [vercel.com](https://vercel.com) → **Add New… → Project** e importa este repositorio de GitHub.
+2. Deja **Framework Preset: Other**. El archivo `vercel.json` ya indica todo: publica la carpeta `web/` y ejecuta `node tools/build-config.js`.
+3. En **Settings → Environment Variables** agrega (para Production y Preview):
+   - `SUPABASE_URL` = la Project URL de Supabase
+   - `SUPABASE_ANON_KEY` = la anon public key
+4. **Deploy.** Cada push a la rama vuelve a publicar la página.
+5. En Supabase → **Authentication → URL Configuration**, pon tu dominio de Vercel en **Site URL** (y en *Redirect URLs*) para que los correos de confirmación regresen a tu página.
+
+Para probar en tu PC con las mismas variables, crea `.env.local` (no se sube a GitHub) con esos dos valores y ejecuta `node tools/build-config.js`; luego sirve la carpeta `web/`, por ejemplo con `npx serve web`.
+
 ## 💻 Usar en PC
 
 - Descarga el repositorio y abre `web/index.html` en Chrome o Edge, **o**
@@ -55,7 +67,7 @@ El APK se compila automáticamente con GitHub Actions (`.github/workflows/androi
 1. Crea un proyecto gratis en [supabase.com](https://supabase.com).
 2. Ve a **SQL Editor → New query**, pega el contenido de [`supabase/schema.sql`](supabase/schema.sql) y pulsa **Run**. Crea las tablas, el espacio privado `documentos` para los PDF y las reglas de seguridad (cada usuario solo ve sus datos). Si ya lo habías ejecutado antes, vuelve a ejecutarlo para agregar el espacio de PDF (no borra nada).
 3. En **Project Settings → API** copia la **Project URL** y la **anon public key**.
-4. En la app: **Validaciones → botón de nube** (o **⋯ → Nube y dispositivo**), pega la URL y la clave, y pulsa **Conectar**.
+4. La app ya viene conectada a este proyecto (valores en `web/js/config.js`), así que no hay que pegar la URL ni la clave. Si quisieras usar otro proyecto: **Validaciones → botón de nube → Cambiar**.
 5. Crea tu cuenta con correo y contraseña (o inicia sesión). Si Supabase pide confirmar el correo, confírmalo y vuelve a iniciar sesión.
 6. Repite el inicio de sesión en tus otros dispositivos con la misma cuenta.
 
